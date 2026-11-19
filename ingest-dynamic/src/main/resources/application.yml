@@ -1,0 +1,59 @@
+server:
+  port: ${SERVER_PORT:8082}
+
+spring:
+  application:
+    name: ingest-dynamic
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/edupulse}
+    username: ${POSTGRES_USER:postgres}
+    password: ${POSTGRES_PASSWORD:postgres}
+  ai:
+    google:
+      genai:
+        api-key: ${LLM_API_KEY:}
+        chat:
+          model: ${LLM_CHAT_MODEL:gemini-3.5-flash-lite}
+        embedding:
+          api-key: ${LLM_API_KEY:}
+          text:
+            model: ${LLM_EMBEDDING_MODEL:gemini-embedding-001}
+            dimensions: ${EMBEDDING_DIMENSIONS:1536}
+    vectorstore:
+      pgvector:
+        index-type: HNSW
+        distance-type: COSINE_DISTANCE
+        dimensions: ${EMBEDDING_DIMENSIONS:1536}
+        initialize-schema: false
+
+eureka:
+  instance:
+    prefer-ip-address: true
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URI:http://localhost:8761/eureka/}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when_authorized
+      probes:
+        enabled: true
+
+app:
+  chunk-size: ${APP_CHUNK_SIZE:512}
+  chunk-overlap: ${APP_CHUNK_OVERLAP:64}
+  watcher:
+    interval-sec: ${APP_WATCHER_INTERVAL_SEC:30}
+    resources-dir: ${APP_WATCHER_RESOURCES_DIR:/app/resources}
+  ingest:
+    max-bytes: ${APP_INGEST_MAX_BYTES:20971520}
+    timeout-ms: ${APP_INGEST_TIMEOUT_MS:10000}
+    block-private-networks: ${APP_INGEST_BLOCK_PRIVATE_NETWORKS:true}
+    allowed-domains: ${APP_INGEST_ALLOWED_DOMAINS:kubernetes.io,github.com,raw.githubusercontent.com,cncf.io}
+  webhook:
+    secret: ${VENDOR_WEBHOOK_SECRET:}

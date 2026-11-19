@@ -1,0 +1,9 @@
+acronyms:
+  K8s: "Kubernetes"
+  CNI: "Container Network Interface"
+  RBAC: "Role-Based Access Control"
+  PVC: "PersistentVolumeClaim"
+  HPA: "HorizontalPodAutoscaler"
+  CRD: "CustomResourceDefinition"
+  OCI: "Open Container Initiative"
+  TLS: "Transport Layer Security"

@@ -1,0 +1,15 @@
+[
+  {
+    "id": "k8s-sample-001",
+    "question": "What is a Kubernetes Pod?",
+    "expectedTopics": ["smallest deployable unit", "shared network", "containers"],
+    "expectedSource": "kubernetes.io",
+    "inScope": true
+  },
+  {
+    "id": "oos-sample-001",
+    "question": "What is the recipe for chocolate chip cookies?",
+    "expectedAnswer": "I don’t know.",
+    "inScope": false
+  }
+]

@@ -1,0 +1,1 @@
+# Keep ./resources directory tracked in Git for read-only Docker volume mounts.

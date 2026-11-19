@@ -1,0 +1,218 @@
+services:
+  pgvector:
+    image: pgvector/pgvector:pg16
+    container_name: edupulse-pgvector
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-edupulse}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - pgvector_data:/var/lib/postgresql/data
+    networks:
+      - edupulse-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-edupulse}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  eureka-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE_NAME: eureka-server
+    container_name: edupulse-eureka-server
+    ports:
+      - "127.0.0.1:8761:8761"
+    environment:
+      SERVER_PORT: 8761
+      EUREKA_HOST: eureka-server
+    networks:
+      - edupulse-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8761/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 25s
+
+  ingest-static:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE_NAME: ingest-static
+    container_name: edupulse-ingest-static
+    depends_on:
+      pgvector:
+        condition: service_healthy
+      eureka-server:
+        condition: service_healthy
+    volumes:
+      - ./resources:/app/resources:ro
+    environment:
+      SERVER_PORT: 8081
+      SPRING_DATASOURCE_URL: jdbc:postgresql://pgvector:5432/${POSTGRES_DB:-edupulse}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      EUREKA_URI: http://eureka-server:8761/eureka/
+      LLM_API_KEY: ${LLM_API_KEY:?LLM_API_KEY is required}
+      LLM_CHAT_MODEL: ${LLM_CHAT_MODEL:-gemini-3.5-flash-lite}
+      LLM_EMBEDDING_MODEL: ${LLM_EMBEDDING_MODEL:-gemini-embedding-001}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1536}
+      APP_CHUNK_SIZE: ${APP_CHUNK_SIZE:-512}
+      APP_CHUNK_OVERLAP: ${APP_CHUNK_OVERLAP:-64}
+      APP_STATIC_RESOURCES_DIR: ${APP_STATIC_RESOURCES_DIR:-/app/resources}
+    networks:
+      - edupulse-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8081/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  ingest-dynamic:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE_NAME: ingest-dynamic
+    container_name: edupulse-ingest-dynamic
+    depends_on:
+      ingest-static:
+        condition: service_healthy
+    volumes:
+      - ./resources:/app/resources:ro
+    environment:
+      SERVER_PORT: 8082
+      SPRING_DATASOURCE_URL: jdbc:postgresql://pgvector:5432/${POSTGRES_DB:-edupulse}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      EUREKA_URI: http://eureka-server:8761/eureka/
+      LLM_API_KEY: ${LLM_API_KEY:?LLM_API_KEY is required}
+      LLM_CHAT_MODEL: ${LLM_CHAT_MODEL:-gemini-3.5-flash-lite}
+      LLM_EMBEDDING_MODEL: ${LLM_EMBEDDING_MODEL:-gemini-embedding-001}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1536}
+      VENDOR_WEBHOOK_SECRET: ${VENDOR_WEBHOOK_SECRET:?VENDOR_WEBHOOK_SECRET is required}
+      APP_CHUNK_SIZE: ${APP_CHUNK_SIZE:-512}
+      APP_CHUNK_OVERLAP: ${APP_CHUNK_OVERLAP:-64}
+      APP_WATCHER_INTERVAL_SEC: ${APP_WATCHER_INTERVAL_SEC:-30}
+      APP_WATCHER_RESOURCES_DIR: ${APP_WATCHER_RESOURCES_DIR:-/app/resources}
+      APP_INGEST_MAX_BYTES: ${APP_INGEST_MAX_BYTES:-20971520}
+      APP_INGEST_TIMEOUT_MS: ${APP_INGEST_TIMEOUT_MS:-10000}
+      APP_INGEST_BLOCK_PRIVATE_NETWORKS: ${APP_INGEST_BLOCK_PRIVATE_NETWORKS:-true}
+      APP_INGEST_ALLOWED_DOMAINS: ${APP_INGEST_ALLOWED_DOMAINS:-kubernetes.io,github.com,raw.githubusercontent.com,cncf.io}
+    networks:
+      - edupulse-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8082/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  retrieval-pre:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE_NAME: retrieval-pre
+    container_name: edupulse-retrieval-pre
+    depends_on:
+      ingest-static:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8083
+      SPRING_DATASOURCE_URL: jdbc:postgresql://pgvector:5432/${POSTGRES_DB:-edupulse}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      EUREKA_URI: http://eureka-server:8761/eureka/
+      LLM_API_KEY: ${LLM_API_KEY:?LLM_API_KEY is required}
+      LLM_CHAT_MODEL: ${LLM_CHAT_MODEL:-gemini-3.5-flash-lite}
+      LLM_EMBEDDING_MODEL: ${LLM_EMBEDDING_MODEL:-gemini-embedding-001}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1536}
+      APP_MULTI_QUERY_VARIANTS: ${APP_MULTI_QUERY_VARIANTS:-3}
+      APP_MULTI_QUERY_TIMEOUT_MS: ${APP_MULTI_QUERY_TIMEOUT_MS:-1500}
+      APP_ACRONYMS_RESOURCE: ${APP_ACRONYMS_RESOURCE:-classpath:acronyms.yml}
+    networks:
+      - edupulse-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8083/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  retrieval-post:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE_NAME: retrieval-post
+    container_name: edupulse-retrieval-post
+    depends_on:
+      ingest-static:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8084
+      SPRING_DATASOURCE_URL: jdbc:postgresql://pgvector:5432/${POSTGRES_DB:-edupulse}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      EUREKA_URI: http://eureka-server:8761/eureka/
+      LLM_API_KEY: ${LLM_API_KEY:?LLM_API_KEY is required}
+      LLM_CHAT_MODEL: ${LLM_CHAT_MODEL:-gemini-3.5-flash-lite}
+      LLM_EMBEDDING_MODEL: ${LLM_EMBEDDING_MODEL:-gemini-embedding-001}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1536}
+      COHERE_API_KEY: ${COHERE_API_KEY:-}
+      APP_RERANK_TOP_N: ${APP_RERANK_TOP_N:-20}
+      APP_RERANK_TOP_K: ${APP_RERANK_TOP_K:-5}
+      APP_RERANK_MODEL: ${APP_RERANK_MODEL:-rerank-v3.5}
+      APP_TOKEN_BUDGET: ${APP_TOKEN_BUDGET:-2500}
+      APP_SIMILARITY_THRESHOLD: ${APP_SIMILARITY_THRESHOLD:-0.65}
+      APP_EVAL_GOLDEN_SET_RESOURCE: ${APP_EVAL_GOLDEN_SET_RESOURCE:-classpath:eval/golden-set.json}
+    networks:
+      - edupulse-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8084/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE_NAME: api-gateway
+    container_name: edupulse-api-gateway
+    ports:
+      - "8080:8080"
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+      ingest-static:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8080
+      EUREKA_URI: http://eureka-server:8761/eureka/
+    networks:
+      - edupulse-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+networks:
+  edupulse-net:
+    driver: bridge
+
+volumes:
+  pgvector_data:

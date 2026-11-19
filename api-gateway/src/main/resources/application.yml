@@ -1,0 +1,57 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    gateway:
+      server:
+        webflux:
+          discovery:
+            locator:
+              enabled: true
+              lower-case-service-id: true
+          routes:
+            - id: ingest-static
+              uri: lb://ingest-static
+              predicates:
+                - Path=/ingest-static/**
+              filters:
+                - StripPrefix=1
+            - id: ingest-dynamic
+              uri: lb://ingest-dynamic
+              predicates:
+                - Path=/ingest-dynamic/**
+              filters:
+                - StripPrefix=1
+            - id: retrieval-pre
+              uri: lb://retrieval-pre
+              predicates:
+                - Path=/retrieval-pre/**
+              filters:
+                - StripPrefix=1
+            - id: retrieval-post
+              uri: lb://retrieval-post
+              predicates:
+                - Path=/retrieval-post/**
+              filters:
+                - StripPrefix=1
+
+eureka:
+  instance:
+    prefer-ip-address: true
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URI:http://localhost:8761/eureka/}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when_authorized
+      probes:
+        enabled: true

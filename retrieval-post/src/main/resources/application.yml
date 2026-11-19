@@ -1,0 +1,56 @@
+server:
+  port: ${SERVER_PORT:8084}
+
+spring:
+  application:
+    name: retrieval-post
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/edupulse}
+    username: ${POSTGRES_USER:postgres}
+    password: ${POSTGRES_PASSWORD:postgres}
+  ai:
+    google:
+      genai:
+        api-key: ${LLM_API_KEY:}
+        chat:
+          model: ${LLM_CHAT_MODEL:gemini-3.5-flash-lite}
+        embedding:
+          api-key: ${LLM_API_KEY:}
+          text:
+            model: ${LLM_EMBEDDING_MODEL:gemini-embedding-001}
+            dimensions: ${EMBEDDING_DIMENSIONS:1536}
+    vectorstore:
+      pgvector:
+        index-type: HNSW
+        distance-type: COSINE_DISTANCE
+        dimensions: ${EMBEDDING_DIMENSIONS:1536}
+        initialize-schema: false
+
+eureka:
+  instance:
+    prefer-ip-address: true
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URI:http://localhost:8761/eureka/}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when_authorized
+      probes:
+        enabled: true
+
+app:
+  rerank:
+    top-n: ${APP_RERANK_TOP_N:20}
+    top-k: ${APP_RERANK_TOP_K:5}
+    cohere-api-key: ${COHERE_API_KEY:}
+    model: ${APP_RERANK_MODEL:rerank-v3.5}
+  token-budget: ${APP_TOKEN_BUDGET:2500}
+  similarity-threshold: ${APP_SIMILARITY_THRESHOLD:0.65}
+  eval:
+    golden-set-resource: ${APP_EVAL_GOLDEN_SET_RESOURCE:classpath:eval/golden-set.json}
