@@ -37,9 +37,9 @@ This is a **multi-module Maven project** (`<packaging>pom</packaging>` at root) 
 6. `retrieval-post` — **Story 4**: Cross-encoder reranking, neighbor stitching with token budget, mandatory citations & similarity-threshold `"I don’t know."` fallback, and evaluation harness (`classpath:eval/golden-set.json`).
 
 ### Team Ownership Boundaries (Do Not Cross Without Explicit Request)
-* **Laurențiu (PM & Architect):** Root POM, `docker-compose.yml`, `eureka-server`, `api-gateway`, `ingest-static` (all tasks), and `retrieval-pre` (Tasks 1 & 2: metadata filters + query normalization).
-* **Alex (Security & Dynamic Ingestion):** `ingest-dynamic` (all tasks) + SSRF/security hardening.
-* **Antonio (AI, Retrieval & Evaluation):** `retrieval-post` (all tasks) + `retrieval-pre` (Tasks 3 & 4: acronym expansion + multi-query expander).
+* **Laurențiu (PM & Architect) — Branch `feat/ingest-static-and-dynamic`:** Root POM, `docker-compose.yml`, `eureka-server`, `api-gateway`, `ingest-static` (Story 1 — Task 1: PDF ingestion), and `ingest-dynamic` (Story 2 — Tasks 1, 2, 3: web/GitHub/remote PDF ingestion with SSRF protection, document versioning, 30s file watcher & HMAC webhooks).
+* **Alex — Branch `feat/retrieval-pre`:** `retrieval-pre` (Story 3 complete — Tasks 1, 2, 3, 4: metadata filters, ReDoS-safe query normalization, external acronym expansion, multi-query expansion & RRF fusion).
+* **Antonio — Branch `feat/retrieval-post`:** `retrieval-post` (Story 4 complete — Tasks 1, 2, 3, 4: Cohere reranking, neighbor stitching with token budget, mandatory citations & `"I don’t know."` fallback, evaluation harness).
 
 ---
 

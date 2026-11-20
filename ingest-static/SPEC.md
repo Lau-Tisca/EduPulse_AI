@@ -1,6 +1,7 @@
 # `ingest-static` — Technical Specification (Story 1)
 
-- **Owner:** Laurențiu (PM & Architect)
+- **Owner:** Laurențiu (PM & Architect) — **Branch:** `feat/ingest-static-and-dynamic`
+- **Epic 1 Scope:** **Story 1 — Task 1** (per `epic1_team_plan.md` & `plan.md` Phase 4)
 - **Service Name:** `ingest-static` (`server.port: ${SERVER_PORT:8081}`)
 - **Schema Role:** **Sole owner** of `pgvector` schema initialization (`spring.ai.vectorstore.pgvector.initialize-schema=true`). All other RAG services MUST set `initialize-schema=false`.
 - **Volume Mount:** `./resources:/app/resources:ro`
@@ -20,29 +21,17 @@
 
 ## Story 1 Tasks & Acceptance Criteria
 
-### Task 1 — PDF Ingestion (`POST /ingest/static`)
-- Parse local PDFs (including multi-column layouts and tables) via Spring AI PDF/Tika document readers.
-- Perform structure-aware chunking (`APP_CHUNK_SIZE=512`, `APP_CHUNK_OVERLAP=64`).
+### Task 1 — PDF Ingestion (`POST /ingest/static`) *(Epic 1 Deliverable — Phase 4)*
+- Read local PDFs from `./resources` (or uploaded file path), handling multi-column layouts and tables via Spring AI PDF/Tika document readers.
+- Split text using `TokenTextSplitter` configured with `APP_CHUNK_SIZE=512` and `APP_CHUNK_OVERLAP=64`.
 - Attach full metadata to every `Document` chunk:
-  - `doc_id`, `version`, `source`, `page`, `chunk_index`, `checksum` (SHA-256 of file content), `is_latest=true`.
-- **Idempotency:** Re-running ingestion on an unchanged file produces zero duplicate chunks.
+  - `doc_id`, `version` (`1`), `source`, `page`, `chunk_index`, `checksum` (SHA-256 of file bytes), `is_latest=true`.
+- **Idempotency:** If a document with the same `doc_id` and `checksum` already exists in `vector_store`, skip re-embedding and return `200 OK` (no duplicate vectors).
 
-### Task 2 — Atomic Update Process
-- Compare incoming file SHA-256 checksum against the manifest/store; skip unchanged files.
-- Wrap deletion of old chunks and insertion of new chunks in a single database `@Transactional` boundary:
-  - Concurrent readers never observe partial/empty intermediate state.
-  - Any mid-update failure rolls back cleanly, leaving the previous document version intact.
-
-### Task 3 — Delete Process (`DELETE /ingest/static/{docId}`)
-- Delete all vector chunks matching `doc_id` (and update/clean manifest).
-- Run a verification query confirming zero orphaned vectors remain for `doc_id`.
-- Deleting a non-existent `docId` returns `200 OK` or `404 Not Found` with a structured JSON message (never `500`).
-
-### Task 4 — Ingestion Manifest & Re-Index
-- Persist an `ingestion_manifest` table in PostgreSQL tracking `doc_id`, `checksum`, `version`, `ingested_at`, `embedding_model`, and `chunk_count`.
-- **`GET /ingest/static/manifest`:** List all tracked documents and their metadata.
-- **`GET /ingest/static/reconcile`:** Verify zero drift between `ingestion_manifest.chunk_count` and `vector_store` counts.
-- **`POST /ingest/static/reindex`:** Re-index all stored source files when switching embedding models.
+### Backlog / Optional Future Extensions (Out of Epic 1 4-Task Allocation)
+- **Task 2 — Atomic Update Process:** Transactional delete + insert on checksum mismatch.
+- **Task 3 — Delete Process (`DELETE /ingest/static/{docId}`):** Delete chunks + zero-orphan check (`200`/`404`, never `500`).
+- **Task 4 — Ingestion Manifest & Re-Index (`GET /ingest/static/manifest`, `/reconcile`, `POST /reindex`):** Persist `ingestion_manifest` table and verify zero drift.
 
 ---
 

@@ -63,11 +63,11 @@ mvn test
 
 ## Module Ownership & Specifications
 
-| Module | Port (internal) | Owner | Responsibility & Spec |
-|---|---|---|---|
-| `eureka-server` | `8761` (`127.0.0.1`) | Laurențiu | Service discovery registry |
-| `api-gateway` | `8080` (public) | Laurențiu | WebFlux gateway routing via Eureka |
-| `ingest-static` | `8081` | Laurențiu | Local PDF ingestion, atomic checksum updates, manifest & re-index — [ingest-static/SPEC.md](ingest-static/SPEC.md) |
-| `ingest-dynamic` | `8082` | Alex | Web/GitHub/remote PDF ingestion, 30s watcher, HMAC webhooks, SSRF protection — [ingest-dynamic/SPEC.md](ingest-dynamic/SPEC.md) |
-| `retrieval-pre` | `8083` | Laurențiu (Tasks 1–2) & Antonio (Tasks 3–4) | Whitelisted metadata filters, ReDoS-safe normalization, acronyms, multi-query RRF — [retrieval-pre/SPEC.md](retrieval-pre/SPEC.md) |
-| `retrieval-post` | `8084` | Antonio | Cohere `rerank-v3.5`, neighbor stitching, `"I don’t know."` fallback, golden-set eval — [retrieval-post/SPEC.md](retrieval-post/SPEC.md) |
+| Module | Port (internal) | Owner | Branch | Responsibility & Spec |
+|---|---|---|---|---|
+| `eureka-server` | `8761` (`127.0.0.1`) | Laurențiu | `main` | Service discovery registry |
+| `api-gateway` | `8080` (public) | Laurențiu | `main` | WebFlux gateway routing via Eureka |
+| `ingest-static` | `8081` | Laurențiu | `feat/ingest-static-and-dynamic` | Story 1 (Task 1): Local PDF ingestion, structure-aware chunking & idempotency — [ingest-static/SPEC.md](ingest-static/SPEC.md) |
+| `ingest-dynamic` | `8082` | Laurențiu | `feat/ingest-static-and-dynamic` | Story 2 (Tasks 1–3): Web/GitHub/remote PDF ingestion, SSRF protection, versioning, 30s watcher & HMAC webhooks — [ingest-dynamic/SPEC.md](ingest-dynamic/SPEC.md) |
+| `retrieval-pre` | `8083` | Alex | `feat/retrieval-pre` | Story 3 (Tasks 1–4): Whitelisted metadata filters, ReDoS-safe normalization, acronyms, multi-query RRF — [retrieval-pre/SPEC.md](retrieval-pre/SPEC.md) |
+| `retrieval-post` | `8084` | Antonio | `feat/retrieval-post` | Story 4 (Tasks 1–4): Cohere `rerank-v3.5`, neighbor stitching, `"I don’t know."` fallback, golden-set eval — [retrieval-post/SPEC.md](retrieval-post/SPEC.md) |

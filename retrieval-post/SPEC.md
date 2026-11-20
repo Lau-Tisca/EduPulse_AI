@@ -1,6 +1,7 @@
 # `retrieval-post` — Technical Specification (Story 4)
 
-- **Owner:** Antonio (AI, Retrieval & Evaluation)
+- **Owner:** Antonio (AI, Retrieval & Evaluation) — **Branch:** `feat/retrieval-post`
+- **Epic 1 Scope:** **Story 4 Complete (Tasks 1, 2, 3, 4)** (per `epic1_team_plan.md`)
 - **Service Name:** `retrieval-post` (`server.port: ${SERVER_PORT:8084}`)
 - **Schema Role:** `spring.ai.vectorstore.pgvector.initialize-schema=false` (waits for `ingest-static` healthy).
 
