@@ -4,6 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -68,7 +71,7 @@ class StaticIngestServiceTest {
     void ingestsMultiColumnAndTablePdfWithAllMandatoryMetadata() throws IOException {
         Path pdfPath = tempDir.resolve("k8s-architecture-guide.pdf");
         Files.write(pdfPath, createMultiColumnAndTablePdf());
-        when(checksumRepository.existsByDocIdAndChecksum(anyString(), anyString())).thenReturn(false);
+        when(checksumRepository.tryClaim(anyString(), anyString())).thenReturn(true);
 
         StaticIngestResponse response = staticIngestService.ingest("k8s-architecture-guide.pdf", null);
 
@@ -117,7 +120,7 @@ class StaticIngestServiceTest {
     @Test
     void skipsReIngestionWhenDocIdAndChecksumAlreadyExist() throws IOException {
         byte[] pdfBytes = createMultiColumnAndTablePdf();
-        when(checksumRepository.existsByDocIdAndChecksum(anyString(), anyString())).thenReturn(true);
+        when(checksumRepository.tryClaim(anyString(), anyString())).thenReturn(false);
 
         StaticIngestItemResult result = staticIngestService.ingestBytes(
                 pdfBytes,
@@ -136,7 +139,7 @@ class StaticIngestServiceTest {
         Files.write(tempDir.resolve("doc-a.pdf"), createMultiColumnAndTablePdf());
         Files.write(tempDir.resolve("doc-b.pdf"), createMultiColumnAndTablePdf());
         Files.writeString(tempDir.resolve("ignore-me.txt"), "not a pdf");
-        when(checksumRepository.existsByDocIdAndChecksum(anyString(), anyString())).thenReturn(false);
+        when(checksumRepository.tryClaim(anyString(), anyString())).thenReturn(true);
 
         StaticIngestResponse response = staticIngestService.ingest(null, null);
 
@@ -157,7 +160,7 @@ class StaticIngestServiceTest {
     @Test
     void throwsInvalidPdfExceptionForCorruptedNonPdfContent() {
         byte[] invalidBytes = "This is plain text, not a PDF file.".getBytes(StandardCharsets.UTF_8);
-        when(checksumRepository.existsByDocIdAndChecksum(anyString(), anyString())).thenReturn(false);
+        when(checksumRepository.tryClaim(anyString(), anyString())).thenReturn(true);
 
         assertThatThrownBy(() -> staticIngestService.ingestBytes(invalidBytes, "corrupted.pdf", null))
                 .isInstanceOf(InvalidPdfException.class)
@@ -170,6 +173,37 @@ class StaticIngestServiceTest {
         assertThatThrownBy(() -> staticIngestService.ingest("../outside.pdf", null))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("static resources directory");
+    }
+
+    @Test
+    void rejectsAbsoluteFilePathOutsideOrInsideStaticResourcesDir() {
+        assertThatThrownBy(() -> staticIngestService.ingest(tempDir.resolve("guide.pdf").toString(), null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("relative");
+    }
+
+    @Test
+    void removesPartialVectorsAndMarksClaimFailedWhenBatchWritingFails() throws IOException {
+        byte[] pdfBytes = createMultiColumnAndTablePdf();
+        when(checksumRepository.tryClaim(anyString(), anyString())).thenReturn(true);
+        doThrow(new IllegalStateException("embedding failed"))
+                .when(vectorStore).add(anyList());
+
+        assertThatThrownBy(() -> staticIngestService.ingestBytes(
+                pdfBytes,
+                "k8s-architecture-guide.pdf",
+                "k8s-architecture-guide"
+        )).isInstanceOf(IllegalStateException.class)
+                .hasMessage("embedding failed");
+
+        verify(checksumRepository).deleteByDocIdAndChecksum(
+                eq("k8s-architecture-guide"),
+                argThat(checksum -> checksum != null && checksum.length() == 64)
+        );
+        verify(checksumRepository).markFailed(
+                eq("k8s-architecture-guide"),
+                argThat(checksum -> checksum != null && checksum.length() == 64)
+        );
     }
 
     @Test

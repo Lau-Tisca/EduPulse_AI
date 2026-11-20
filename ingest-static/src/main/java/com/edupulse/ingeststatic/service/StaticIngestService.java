@@ -91,6 +91,17 @@ public class StaticIngestService {
     }
 
     public StaticIngestItemResult ingestFile(Path filePath, String customDocId) {
+        Path baseDir = Path.of(properties.staticResourcesDir()).toAbsolutePath().normalize();
+        try {
+            Path baseReal = baseDir.toRealPath();
+            Path fileReal = filePath.toRealPath();
+            if (!fileReal.startsWith(baseReal)) {
+                throw new IllegalArgumentException("filePath must stay inside the static resources directory");
+            }
+            filePath = fileReal;
+        } catch (IOException ex) {
+            throw new PdfNotFoundException("PDF file not found: " + filePath);
+        }
         if (!Files.exists(filePath) || !Files.isRegularFile(filePath)) {
             throw new PdfNotFoundException("PDF file not found: " + filePath);
         }
@@ -106,12 +117,12 @@ public class StaticIngestService {
         }
     }
 
-    public StaticIngestItemResult ingestBytes(byte[] pdfBytes, String filename, String customDocId) {
+    public synchronized StaticIngestItemResult ingestBytes(byte[] pdfBytes, String filename, String customDocId) {
         String source = (filename == null || filename.isBlank()) ? "uploaded.pdf" : filename.trim();
         String docId = deriveDocId(customDocId, source);
         String checksum = checksumService.sha256(pdfBytes);
 
-        if (checksumRepository.existsByDocIdAndChecksum(docId, checksum)) {
+        if (!checksumRepository.tryClaim(docId, checksum)) {
             log.info("Skipping static PDF ingestion (unchanged): docId={}, source={}, checksum={}",
                     docId, source, checksum);
             return new StaticIngestItemResult(
@@ -129,37 +140,53 @@ public class StaticIngestService {
         log.info("Starting static PDF ingestion: docId={}, source={}, sizeBytes={}",
                 docId, source, pdfBytes.length);
 
-        List<Document> pages = pdfDocumentParser.parse(pdfBytes, source);
-        List<Document> chunks = chunker.chunk(pages, docId, source, checksum, INITIAL_VERSION);
+        try {
+            List<Document> pages = pdfDocumentParser.parse(pdfBytes, source);
+            List<Document> chunks = chunker.chunk(pages, docId, source, checksum, INITIAL_VERSION);
+            batchWriter.addAll(chunks, docId);
+            checksumRepository.markCompleted(docId, checksum);
+            log.info("Completed static PDF ingestion: docId={}, source={}, pages={}, chunks={}, checksum={}",
+                    docId, source, pages.size(), chunks.size(), checksum);
 
-        batchWriter.addAll(chunks, docId);
-
-        log.info("Completed static PDF ingestion: docId={}, source={}, pages={}, chunks={}, checksum={}",
-                docId, source, pages.size(), chunks.size(), checksum);
-
-        return new StaticIngestItemResult(
-                docId,
-                source,
-                checksum,
-                INITIAL_VERSION,
-                pages.size(),
-                chunks.size(),
-                StaticIngestItemResult.STATUS_INGESTED,
-                "Document ingested and indexed successfully."
-        );
+            return new StaticIngestItemResult(
+                    docId,
+                    source,
+                    checksum,
+                    INITIAL_VERSION,
+                    pages.size(),
+                    chunks.size(),
+                    StaticIngestItemResult.STATUS_INGESTED,
+                    "Document ingested and indexed successfully."
+            );
+        } catch (RuntimeException ex) {
+            checksumRepository.deleteByDocIdAndChecksum(docId, checksum);
+            checksumRepository.markFailed(docId, checksum);
+            log.error("Static PDF ingestion failed; removed partial vectors: docId={}, source={}, checksum={}",
+                    docId, source, checksum, ex);
+            throw ex;
+        }
     }
 
     private Path resolveFilePath(String requestedFilePath) {
         Path rawPath = Path.of(requestedFilePath);
         if (rawPath.isAbsolute()) {
-            return rawPath.normalize();
+            throw new IllegalArgumentException("filePath must be relative to the static resources directory");
         }
         Path baseDir = Path.of(properties.staticResourcesDir()).toAbsolutePath().normalize();
         Path resolved = baseDir.resolve(rawPath).normalize();
         if (!resolved.startsWith(baseDir)) {
             throw new IllegalArgumentException("Relative filePath must stay inside static resources directory");
         }
-        return resolved;
+        try {
+            Path baseReal = baseDir.toRealPath();
+            Path resolvedReal = resolved.toRealPath();
+            if (!resolvedReal.startsWith(baseReal)) {
+                throw new IllegalArgumentException("filePath must stay inside the static resources directory");
+            }
+            return resolvedReal;
+        } catch (IOException ex) {
+            throw new PdfNotFoundException("PDF file not found: " + resolved);
+        }
     }
 
     private String deriveDocId(String customDocId, String source) {

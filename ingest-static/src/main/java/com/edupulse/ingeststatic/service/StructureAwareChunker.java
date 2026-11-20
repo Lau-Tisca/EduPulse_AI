@@ -1,8 +1,10 @@
 package com.edupulse.ingeststatic.service;
 
 import com.edupulse.ingeststatic.config.IngestStaticProperties;
+import com.knuddels.jtokkit.Encodings;
+import com.knuddels.jtokkit.api.Encoding;
+import com.knuddels.jtokkit.api.IntArrayList;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -18,6 +20,8 @@ import org.springframework.stereotype.Service;
 public class StructureAwareChunker {
 
     private final IngestStaticProperties properties;
+    private final Encoding encoding = Encodings.newLazyEncodingRegistry()
+            .getEncoding(com.knuddels.jtokkit.api.EncodingType.CL100K_BASE);
 
     public StructureAwareChunker(IngestStaticProperties properties) {
         this.properties = properties;
@@ -74,16 +78,24 @@ public class StructureAwareChunker {
         if (overlapTokens <= 0 || previousText == null || previousText.isBlank()) {
             return currentText.trim();
         }
-        String[] words = previousText.trim().split("\\s+");
-        if (words.length == 0) {
+        IntArrayList previousTokens = encoding.encodeOrdinary(previousText.trim());
+        IntArrayList currentTokens = encoding.encodeOrdinary(currentText.trim());
+        if (previousTokens.isEmpty() || currentTokens.isEmpty()) {
             return currentText.trim();
         }
-        int start = Math.max(0, words.length - overlapTokens);
-        String overlapPrefix = String.join(" ", Arrays.copyOfRange(words, start, words.length));
-        if (currentText.startsWith(overlapPrefix)) {
-            return currentText.trim();
+
+        int overlapCount = Math.min(overlapTokens, previousTokens.size());
+        int remaining = properties.chunkSize() - overlapCount;
+
+        IntArrayList combined = new IntArrayList(properties.chunkSize());
+        int previousStart = previousTokens.size() - overlapCount;
+        for (int i = previousStart; i < previousTokens.size(); i++) {
+            combined.add(previousTokens.get(i));
         }
-        return overlapPrefix + "\n" + currentText.trim();
+        for (int i = 0; i < Math.min(Math.max(0, remaining), currentTokens.size()); i++) {
+            combined.add(currentTokens.get(i));
+        }
+        return encoding.decode(combined).trim();
     }
 
     private int resolvePageNumber(Map<String, Object> metadata) {
