@@ -35,6 +35,31 @@
 
 ---
 
+## API Usage (via `api-gateway` on `:8080`)
+
+### 1. Ingest all PDFs from `./resources` (`/app/resources`)
+```bash
+curl -X POST http://localhost:8080/ingest-static/ingest/static \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+### 2. Ingest a specific PDF from `./resources`
+```bash
+curl -X POST http://localhost:8080/ingest-static/ingest/static \
+  -H "Content-Type: application/json" \
+  -d '{"filePath":"kubernetes-architecture.pdf","docId":"k8s-arch"}'
+```
+
+### 3. Upload a PDF directly (`multipart/form-data`)
+```bash
+curl -X POST http://localhost:8080/ingest-static/ingest/static/upload \
+  -F "file=@./resources/kubernetes-architecture.pdf" \
+  -F "docId=k8s-arch"
+```
+
+---
+
 ## Definition of Done
 - Success + failure/edge unit & integration tests for every task (`mvn test -pl ingest-static`).
 - Structured `SLF4J` logging for ingestion lifecycle, checksum skips, rollbacks, and deletions.
