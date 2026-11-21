@@ -101,3 +101,21 @@ When implementing any task, you **MUST** deliver all of the following:
 3. Structured logging (`SLF4J`) for key lifecycle events and errors.
 4. Configuration properties externalized via `${APP_...}` placeholders in `application.yml` and documented in `.env.example`.
 5. Module `README.md` or `SPEC.md` updated with usage/endpoints.
+
+---
+
+## 8. Agent Onboarding Protocol (Name + Week) & Mandatory PR Review
+When a team member starts a session by giving only their **name** (`Laurențiu`, `Alex`, or `Antonio`) and **week** (`Week 1`, `Week 2`, or `Week 3`), the AI agent **MUST** automatically read all relevant context before writing any code:
+1. `AGENTS.md` — mandatory stack, infrastructure, security, and Definition of Done rules.
+2. `epic1_week_distribution.md` — exact deliverables assigned to that member for that specific week.
+3. `epic1_team_plan.md` — full Story & Task acceptance criteria and numeric targets.
+4. The member's module `SPEC.md`:
+   * **Laurențiu:** `ingest-static/SPEC.md` and `ingest-dynamic/SPEC.md`
+   * **Alex:** `retrieval-pre/SPEC.md`
+   * **Antonio:** `retrieval-post/SPEC.md`
+5. `docs/weekly/week-<N>.md` (e.g., `docs/weekly/week-1.md`) — check current status and update the member's `Done` / `In Progress` / `Blockers` section once tasks are completed.
+
+### Git & Pull Request Rules (Mandatory)
+* **No Direct Pushes to `main`:** Always work on your assigned feature branch (`feat/retrieval-pre` for Alex, `feat/retrieval-post` for Antonio, `feat/ingest-static-and-dynamic` / `feat/ingest-dynamic` for Laurențiu).
+* **Mandatory Reviewer:** Before merging any branch into `main`, you **MUST** open a Pull Request and assign **Laurențiu (PM & Architect)** as Reviewer.
+* **Pre-PR Verification:** Run `mvn test -pl <your-module>`, ensure zero secrets are staged (`git status`), and verify all Section 7 Definition of Done items are met.
