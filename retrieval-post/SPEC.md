@@ -32,6 +32,35 @@
 - Call Cohere Rerank API (`rerank-v3.5`) via Spring `RestClient` to rerank top `APP_RERANK_TOP_N=20` candidates down to `APP_RERANK_TOP_K=5`.
 - If `COHERE_API_KEY` is empty or the Cohere API fails/times out, log a warning and gracefully fall back to the original vector similarity ordering.
 
+#### Endpoint: `POST /rerank` (via gateway: `POST http://localhost:8080/retrieval-post/rerank`)
+Runs a vector search for the top `APP_RERANK_TOP_N` latest chunks (`is_latest == true`), then reranks them with Cohere down to `APP_RERANK_TOP_K`. Until `retrieval-pre` hands over its fused candidates, `retrieval-post` fetches candidates itself.
+
+```bash
+curl -X POST http://localhost:8080/retrieval-post/rerank \
+  -H "Content-Type: application/json" \
+  -d '{"query":"How does Kubernetes RBAC work?"}'
+```
+
+```json
+{
+  "query": "How does Kubernetes RBAC work?",
+  "reranked": true,
+  "fallbackReason": null,
+  "model": "rerank-v3.5",
+  "candidates": 20,
+  "latencyMs": 412,
+  "results": [
+    { "rank": 1, "id": "…", "docId": "cncf-cloud-native-security-whitepaper", "version": 1,
+      "source": "cncf-cloud-native-security-whitepaper.pdf", "page": 31, "chunkIndex": 44,
+      "content": "…", "vectorScore": 0.71, "rerankScore": 0.93 }
+  ]
+}
+```
+
+- `reranked=false` + `fallbackReason` (`MISSING_API_KEY`, `TIMEOUT`, `API_ERROR`, `INVALID_RESPONSE`): Cohere was skipped or failed; results keep vector similarity order and `rerankScore` is `null`.
+- `400 Bad Request`: missing/blank `query`, query longer than 1000 characters, or malformed JSON.
+- `503 Service Unavailable`: vector search (embedding API or pgvector) failed.
+
 ### Task 2 — Neighbor Stitching with Token Budget
 - Expand top chunks with adjacent sibling chunks (`chunk_index - 1`, `chunk_index + 1`) for the same `doc_id` and `version`.
 - Deduplicate overlapping chunks and respect `APP_TOKEN_BUDGET=2500` max context tokens.
