@@ -12,6 +12,7 @@
 |---|---|---|
 | Rerank Candidates (`topN` -> `topK`) | `20` -> `5` | `APP_RERANK_TOP_N` / `APP_RERANK_TOP_K` |
 | Rerank Model | `rerank-v3.5` | `APP_RERANK_MODEL` |
+| Rerank API Timeout (connect/read, ms) | `3000` | `APP_RERANK_TIMEOUT_MS` |
 | Cohere API Key | *(optional)* | `COHERE_API_KEY` |
 | Neighbor Stitching Token Budget | `2500` | `APP_TOKEN_BUDGET` |
 | Similarity Threshold | `0.65` | `APP_SIMILARITY_THRESHOLD` |
