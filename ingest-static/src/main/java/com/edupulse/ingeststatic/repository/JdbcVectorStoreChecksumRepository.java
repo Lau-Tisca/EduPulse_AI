@@ -22,14 +22,7 @@ public class JdbcVectorStoreChecksumRepository implements VectorStoreChecksumRep
 
     @Override
     public boolean tryClaim(String docId, String checksum) {
-        jdbcTemplate.execute("""
-                CREATE TABLE IF NOT EXISTS static_ingest_state (
-                    doc_id VARCHAR(255) PRIMARY KEY,
-                    checksum VARCHAR(64) NOT NULL,
-                    status VARCHAR(16) NOT NULL,
-                    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
-                """);
+        ensureStateTable();
 
         Boolean claimed;
         try {
@@ -52,6 +45,16 @@ public class JdbcVectorStoreChecksumRepository implements VectorStoreChecksumRep
                 WHERE metadata->>'doc_id' = ? AND metadata->>'checksum' = ?
                 """, docId, checksum);
         return true;
+    }
+
+    @Override
+    public int resetInterruptedClaims() {
+        ensureStateTable();
+        return jdbcTemplate.update("""
+                UPDATE static_ingest_state
+                SET status = 'FAILED', updated_at = CURRENT_TIMESTAMP
+                WHERE status = 'CLAIMED'
+                """);
     }
 
     @Override
@@ -84,5 +87,16 @@ public class JdbcVectorStoreChecksumRepository implements VectorStoreChecksumRep
     public boolean existsByDocIdAndChecksum(String docId, String checksum) {
         Integer count = jdbcTemplate.queryForObject(EXISTS_SQL, Integer.class, docId, checksum);
         return count != null && count > 0;
+    }
+
+    private void ensureStateTable() {
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS static_ingest_state (
+                    doc_id VARCHAR(255) PRIMARY KEY,
+                    checksum VARCHAR(64) NOT NULL,
+                    status VARCHAR(16) NOT NULL,
+                    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """);
     }
 }

@@ -27,6 +27,7 @@
 - Attach full metadata to every `Document` chunk:
   - `doc_id`, `version` (`1`), `source`, `page`, `chunk_index`, `checksum` (SHA-256 of file bytes), `is_latest=true`.
 - **Idempotency:** If a document with the same `doc_id` and `checksum` already exists in `vector_store`, skip re-embedding and return `200 OK` (no duplicate vectors).
+- **Interrupted ingestion recovery:** On startup (`ApplicationReadyEvent`), any `static_ingest_state` row left in `CLAIMED` (service stopped mid-ingestion) is reset to `FAILED` and logged as `WARN`. The next `POST /ingest/static` re-claims the document, deletes its partial vectors, and re-ingests it instead of returning `SKIPPED`.
 
 ### Backlog / Optional Future Extensions (Out of Epic 1 4-Task Allocation)
 - **Task 2 — Atomic Update Process:** Transactional delete + insert on checksum mismatch.

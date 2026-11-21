@@ -14,4 +14,12 @@ public interface VectorStoreChecksumRepository {
     void markFailed(String docId, String checksum);
 
     void deleteByDocIdAndChecksum(String docId, String checksum);
+
+    /**
+     * Marks every ingestion left in {@code CLAIMED} state as {@code FAILED} so the next
+     * ingestion run re-claims it and replaces its partial vectors.
+     *
+     * @return number of interrupted claims that were reset
+     */
+    int resetInterruptedClaims();
 }
