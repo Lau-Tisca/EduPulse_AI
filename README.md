@@ -72,16 +72,3 @@ mvn test
 | `retrieval-pre` | `8083` | Alex | `feat/retrieval-pre` | Story 3 (Tasks 1–4): Whitelisted metadata filters, ReDoS-safe normalization, acronyms, multi-query RRF — [retrieval-pre/SPEC.md](retrieval-pre/SPEC.md) |
 | `retrieval-post` | `8084` | Antonio | `feat/retrieval-post` | Story 4 (Tasks 1–4): Cohere `rerank-v3.5`, neighbor stitching, `"I don’t know."` fallback, golden-set eval — [retrieval-post/SPEC.md](retrieval-post/SPEC.md) |
 
----
-
-## Weekly Workflow & AI Agent Prompt (For Team Members)
-
-To start working with any AI coding agent (Antigravity, Copilot, Cursor, etc.), just send your **name** and **week** — the agent will automatically load `AGENTS.md`, `epic1_week_distribution.md`, `epic1_team_plan.md`, your module `SPEC.md`, and `docs/weekly/week-<N>.md`:
-
-> **Example prompt:**
-> `Sunt Alex, lucrez la Week 1. Citește AGENTS.md și execută task-urile mele pentru această săptămână.`
-
-### PR & Merge Rule
-- Never push directly to `main`; always work on your assigned feature branch.
-- Before merging into `main`, open a Pull Request, run `mvn test -pl <your-module>`, update `docs/weekly/week-<N>.md`, and **assign Laurențiu as Reviewer**.
-

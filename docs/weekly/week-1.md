@@ -25,10 +25,8 @@
   - Ran `POST /ingest/static`; the 4 Cloud/K8s PDFs are indexed in `pgvector`. Verified directly in the DB: `385` chunks in `vector_store`, and a re-run returns `SKIPPED` for all 4 files (idempotent ingestion).
   - Story 3 Task 1 (safe metadata filtering): `FilterParser` + `ValidatedFilter` with field/operator allowlists, HTTP 400 JSON listing valid fields and operators, default `is_latest=true`, endpoint `GET /filters/validate`, unit tests (success + failure) and Postman collection.
   - Story 3 Task 2 (query normalization): `QueryNormalizer` with ordered, precompiled ReDoS-safe regex rules (greetings, polite prefixes, trailing `?`/thanks), input capped at 1000 chars, raw + normalized query logged, endpoint `GET /query/normalize`, 18 parameterized test cases + idempotency + adversarial `< 50 ms` tests, Postman requests.
-- **In Progress / To Do:**
-  - Implement **Story 3 Complete (`retrieval-pre`: Tasks 1, 2, 3, 4)** per `retrieval-pre/SPEC.md` & `epic1_team_plan.md`:
-    - Task 1 (DONE, see above): Safe metadata filtering (`ValidatedFilter` with field/operator allowlists, `400 Bad Request` on invalid input, `is_latest=true` default, Postman collection at `retrieval-pre/postman/retrieval-pre-filters.postman_collection.json`).
-    - Task 2 (DONE, see above): ReDoS-safe query normalization (`static final Pattern`, raw query logging, `>= 15` parameterized JUnit cases + adversarial `< 50ms` timing test).
+- **In Progress / To Do (Week 2):**
+  - Complete remaining **Story 3 (`retrieval-pre`: Tasks 3 & 4)** per `retrieval-pre/SPEC.md` & `epic1_team_plan.md`:
     - Task 3: External acronym expansion loaded from `classpath:acronyms.yml` (`K8s`, `CNI`, `RBAC`, `PVC`, `HPA`, `CRD`, `OCI`, `TLS`).
     - Task 4: Multi-query expansion (`APP_MULTI_QUERY_VARIANTS=3`, `1500ms` timeout with fallback) and Reciprocal Rank Fusion (RRF).
     - Automated unit & integration tests covering success and failure/edge paths (`mvn test -pl retrieval-pre`).
@@ -57,7 +55,6 @@
   - Task 3: mandatory citations (`source`, `page`, `chunk_index`) + exact `"I don’t know."` fallback; answer generation with `gemini-3.5-flash-lite` on top of `POST /context`.
   - Golden set `classpath:eval/golden-set.json` (`>= 35` Cloud/K8s questions incl. `10` out-of-scope).
   - Agree the candidate contract with Alex (`retrieval-pre` output → `retrieval-post` input: `doc_id`, `version`, `source`, `page`, `chunk_index`, `content`, score) and add an endpoint accepting fused candidates.
-  - PR `feat/retrieval-post` → `main` with Laurențiu as reviewer.
 - **Blockers / Risks:**
   - `APP_SIMILARITY_THRESHOLD=0.65` is too high for our scores. Live measurements: in-scope RBAC query → top `vectorScore 0.60`, top `rerankScore 0.33`; out-of-scope (cookie recipe) → `0.46` / `0.04`. With `0.65` even in-scope questions would return `"I don’t know."`. `rerankScore` separates in/out-of-scope much better than `vectorScore`, so Task 3 should gate on it (vector score only when Cohere falls back) and the threshold must be calibrated on the golden set (Week 3 calibration).
   - Corpus has no official Kubernetes docs yet (only CNCF/AWS whitepapers + kubectl reference), which lowers scores for core K8s questions (e.g. RBAC) — depends on `ingest-dynamic` (Week 2).
