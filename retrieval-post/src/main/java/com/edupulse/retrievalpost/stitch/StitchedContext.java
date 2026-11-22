@@ -8,7 +8,8 @@ import java.util.List;
  * @param passages           ordered by best rerank rank
  * @param totalTokens        sum of passage token counts (always {@code <= tokenBudget})
  * @param droppedHits        rerank hits that did not fit in the budget on their own
- * @param neighborsAvailable {@code false} when neighbor lookup failed and only the hits were used
+ * @param neighborsAvailable {@code false} when the neighbor lookup failed for at least one document (that
+ *                           document's hits are used without neighbors; other documents are still stitched)
  */
 public record StitchedContext(
         List<StitchedPassage> passages,

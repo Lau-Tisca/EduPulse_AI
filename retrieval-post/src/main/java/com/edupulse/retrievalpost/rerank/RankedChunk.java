@@ -1,5 +1,8 @@
 package com.edupulse.retrievalpost.rerank;
 
+import static com.edupulse.retrievalpost.common.MetadataValues.asInteger;
+import static com.edupulse.retrievalpost.common.MetadataValues.asString;
+
 import java.util.Map;
 import org.springframework.ai.document.Document;
 
@@ -38,23 +41,5 @@ public record RankedChunk(
                 document.getScore(),
                 rerankScore
         );
-    }
-
-    private static String asString(Object value) {
-        return value == null ? null : value.toString();
-    }
-
-    private static Integer asInteger(Object value) {
-        if (value instanceof Number number) {
-            return number.intValue();
-        }
-        if (value instanceof String text && !text.isBlank()) {
-            try {
-                return (int) Double.parseDouble(text.trim());
-            } catch (NumberFormatException ignored) {
-                return null;
-            }
-        }
-        return null;
     }
 }

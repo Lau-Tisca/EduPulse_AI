@@ -1,6 +1,6 @@
 package com.edupulse.retrievalpost.controller;
 
-import com.edupulse.retrievalpost.dto.RerankRequest;
+import com.edupulse.retrievalpost.dto.QueryRequest;
 import com.edupulse.retrievalpost.exception.InvalidQueryException;
 
 /**
@@ -17,7 +17,7 @@ final class QueryValidator {
      * @return the trimmed query
      * @throws InvalidQueryException when the query is missing, blank or longer than {@link #MAX_QUERY_LENGTH}
      */
-    static String validate(RerankRequest request) {
+    static String validate(QueryRequest request) {
         if (request == null || request.query() == null || request.query().isBlank()) {
             throw new InvalidQueryException("query must not be blank");
         }

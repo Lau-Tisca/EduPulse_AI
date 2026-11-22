@@ -1,5 +1,6 @@
 package com.edupulse.retrievalpost.dto;
 
+import com.edupulse.retrievalpost.pipeline.PipelineResult;
 import com.edupulse.retrievalpost.rerank.RankedChunk;
 import com.edupulse.retrievalpost.rerank.RerankFallbackReason;
 import com.edupulse.retrievalpost.rerank.RerankResult;
@@ -20,13 +21,14 @@ public record RerankResponse(
         List<RankedChunk> results
 ) {
 
-    public static RerankResponse of(String query, int candidates, RerankResult result) {
+    public static RerankResponse of(PipelineResult pipeline) {
+        RerankResult result = pipeline.rerank();
         return new RerankResponse(
-                query,
+                pipeline.query(),
                 result.reranked(),
                 result.fallbackReason(),
                 result.model(),
-                candidates,
+                pipeline.candidates(),
                 result.latencyMs(),
                 result.results());
     }

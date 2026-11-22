@@ -208,6 +208,33 @@ class NeighborStitchingServiceTest {
         assertThat(context.droppedHits()).isPositive();
     }
 
+    @Test
+    void chargesNeighborsOnlyForTextAddedAfterOverlapRemoval() {
+        stubRepositoryWithDocument();
+        int overlapWords = 7; // "overlap4 tail tail tail tail tail tail"
+        int budget = words(chunkText(5)) + words(chunkText(4)) - overlapWords;
+
+        StitchedContext context = service(budget).stitch(List.of(hit(1, 5, 0.9)));
+
+        // Charged at full size (23 words) chunk 4 would not fit; its stitched contribution (16 words) does.
+        assertThat(context.passages().getFirst().chunkIndexes()).containsExactly(4, 5);
+        assertThat(context.totalTokens()).isEqualTo(budget);
+    }
+
+    @Test
+    void keepsNeighborsOfOtherDocumentsWhenOneLookupFails() {
+        stubRepositoryWithDocument();
+        when(repository.findByChunkIndexes(eq("aws"), eq(2), anyCollection()))
+                .thenThrow(new DataAccessResourceFailureException("transient"));
+        RankedChunk awsHit = new RankedChunk(1, "x", "aws", 2, "aws.pdf", 3, 4, "aws security text", 0.7, 0.95);
+
+        StitchedContext context = service(2500).stitch(List.of(awsHit, hit(2, 5, 0.8)));
+
+        assertThat(context.neighborsAvailable()).isFalse();
+        assertThat(context.passages()).extracting(StitchedPassage::chunkIndexes)
+                .containsExactly(List.of(4), List.of(4, 5, 6));
+    }
+
     private static int occurrences(String text, String needle) {
         return Arrays.stream(text.split(java.util.regex.Pattern.quote(needle), -1)).toList().size() - 1;
     }

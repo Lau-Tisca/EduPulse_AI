@@ -12,11 +12,13 @@
 |---|---|---|
 | Rerank Candidates (`topN` -> `topK`) | `20` -> `5` | `APP_RERANK_TOP_N` / `APP_RERANK_TOP_K` |
 | Rerank Model | `rerank-v3.5` | `APP_RERANK_MODEL` |
-| Rerank API Timeout (connect/read, ms) | `3000` | `APP_RERANK_TIMEOUT_MS` |
+| Rerank API Timeout (connect + per-read, ms) | `3000` | `APP_RERANK_TIMEOUT_MS` |
 | Cohere API Key | *(optional)* | `COHERE_API_KEY` |
 | Neighbor Stitching Token Budget | `2500` | `APP_TOKEN_BUDGET` |
 | Similarity Threshold | `0.65` | `APP_SIMILARITY_THRESHOLD` |
 | Golden Evaluation Set | `classpath:eval/golden-set.json` | `APP_EVAL_GOLDEN_SET_RESOURCE` |
+
+Invalid values (e.g. `APP_RERANK_TOP_K > APP_RERANK_TOP_N`, threshold outside `0..1`, non-positive budget/timeout) are replaced by the defaults above and logged as `WARN`. `APP_SIMILARITY_THRESHOLD=0` is valid (disables the `"I don’t know."` gate, useful for calibration).
 
 ### Evaluation Gates
 - `Recall@5 >= 0.80`
@@ -91,8 +93,9 @@ curl -X POST http://localhost:8080/retrieval-post/context \
 **Stitching rules**
 - Neighbors (`chunk_index ± 1`, same `doc_id` + `version`) are loaded by position from `vector_store` (no embedding call).
 - Adjacent/overlapping chunks are merged into one contiguous passage; each chunk appears once and the text repeated by ingestion overlap (`APP_CHUNK_OVERLAP`) is removed when joining.
-- Token budget (`APP_TOKEN_BUDGET`, counted with the same CL100K tokenizer as ingestion): reranked hits first in rank order (a hit that does not fit is dropped whole → `droppedHits`), then neighbors in the order of their hit's rank. `totalTokens <= tokenBudget` always.
-- If the neighbor lookup fails, the hits are returned without neighbors and `neighborsAvailable=false`.
+- Token budget (`APP_TOKEN_BUDGET`, counted with the same CL100K tokenizer as ingestion): reranked hits first in rank order (a hit that does not fit is dropped whole → `droppedHits`), then neighbors in the order of their hit's rank. Each addition is charged by the tokens of the stitched text it actually adds (overlap removed), so `totalTokens <= tokenBudget` holds exactly.
+- Neighbor metadata is matched as text (no SQL casts), so malformed metadata of other documents cannot break the lookup; unparsable `page` values become `null`.
+- If the neighbor lookup fails for a document, that document's hits are returned without neighbors (other documents are still stitched) and `neighborsAvailable=false`.
 - Passages are ordered by `rank` (best rerank position of the hits they contain).
 
 ### Task 3 — Mandatory Citations & `"I don’t know."` Fallback

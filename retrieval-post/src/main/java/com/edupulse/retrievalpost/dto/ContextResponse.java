@@ -1,5 +1,6 @@
 package com.edupulse.retrievalpost.dto;
 
+import com.edupulse.retrievalpost.pipeline.PipelineResult;
 import com.edupulse.retrievalpost.rerank.RerankFallbackReason;
 import com.edupulse.retrievalpost.rerank.RerankResult;
 import com.edupulse.retrievalpost.stitch.StitchedContext;
@@ -22,13 +23,15 @@ public record ContextResponse(
         List<StitchedPassage> passages
 ) {
 
-    public static ContextResponse of(String query, int candidates, RerankResult rerank, StitchedContext context) {
+    public static ContextResponse of(PipelineResult pipeline) {
+        RerankResult rerank = pipeline.rerank();
+        StitchedContext context = pipeline.context();
         return new ContextResponse(
-                query,
+                pipeline.query(),
                 rerank.reranked(),
                 rerank.fallbackReason(),
                 rerank.model(),
-                candidates,
+                pipeline.candidates(),
                 context.tokenBudget(),
                 context.totalTokens(),
                 context.droppedHits(),
