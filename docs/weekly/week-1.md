@@ -47,7 +47,8 @@
     - `NeighborStitchingService`: expands hits with `chunk_index ± 1` (same `doc_id` + `version`), merges adjacent chunks into contiguous passages and removes the ingestion overlap text (no duplicated content).
     - `APP_TOKEN_BUDGET=2500` enforced with the same CL100K tokenizer as ingestion: hits first in rerank order, then neighbors; `totalTokens <= 2500` always. Neighbor lookup failure → hits only (`neighborsAvailable=false`).
     - Endpoint `POST /retrieval-post/context` (vector search → rerank → stitched passages with pages, chunk indexes and scores). Verified live: e.g. RBAC query → 4 passages, `2222/2500` tokens, overlap text appears once.
-  - Tests: `mvn test -pl retrieval-post` → `46/46` passing (success + failure/fallback paths for every component). Endpoints and rules documented in `retrieval-post/SPEC.md`.
+  - Code review fixes (local Claude review + Copilot): text-based neighbor lookup (malformed metadata cannot break stitching), per-document lookup fallback, overlap-aware token budget, `WARN` on invalid config values, shared `RetrievalPipeline` behind `/rerank` and `/context`, `APP_RERANK_TIMEOUT_MS` passed to the container in `docker-compose.yml`.
+  - Tests: `mvn test -pl retrieval-post` → `59/59` passing (success + failure/fallback paths for every component). Endpoints and rules documented in `retrieval-post/SPEC.md`.
 - **In Progress / To Do (Week 2):**
   - Task 3: mandatory citations (`source`, `page`, `chunk_index`) + exact `"I don’t know."` fallback; answer generation with `gemini-3.5-flash-lite` on top of `POST /context`.
   - Golden set `classpath:eval/golden-set.json` (`>= 35` Cloud/K8s questions incl. `10` out-of-scope).
