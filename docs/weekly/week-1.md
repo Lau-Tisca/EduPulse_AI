@@ -35,13 +35,26 @@
 
 ## Antonio — Branch: `feat/retrieval-post`
 - **Done:**
-  - *(To be updated by Antonio)*
-- **In Progress / To Do:**
-  - Implement **Story 4 Complete (`retrieval-post`: Tasks 1, 2, 3, 4)** per `retrieval-post/SPEC.md` & `epic1_team_plan.md`:
-    - Task 1: Cross-encoder reranking via Cohere Rerank API (`rerank-v3.5`, `20 -> 5`) with graceful fallback to vector order when `COHERE_API_KEY` is missing or fails.
-    - Task 2: Neighbor stitching (`chunk_index ± 1`) with overlap deduplication within `APP_TOKEN_BUDGET=2500`.
-    - Task 3: Mandatory inline citations (`source`, `page`, `chunk_index`) and exact `"I don’t know."` fallback when top score `< 0.65`.
-    - Task 4: Evaluation harness executing `classpath:eval/golden-set.json` (`>= 35` Cloud/K8s questions including `10` out-of-scope; targets: `Recall@5 >= 0.80`, `MRR >= 0.70`, `Faithfulness >= 0.90`).
-    - Automated unit & integration tests covering success and failure/fallback paths (`mvn test -pl retrieval-post`).
-- **Blockers:**
-  - Waiting on `COHERE_API_KEY` / `LLM_API_KEY` for live evaluation runs (sample documents from Phase 4 are now indexed in `pgvector`).
+  - Local setup: `.env` (Postgres, Gemini, Cohere trial key, webhook secret), full Docker stack healthy, `pgvector` populated with the 4 sample PDFs (`385` chunks) and metadata verified (`doc_id`, `version`, `source`, `page`, `chunk_index`, `is_latest`).
+  - Fixed `ingest-static` stuck-claim bug (pushed to `main` with Laurențiu's agreement, commit `4c008e1`): an ingestion interrupted mid-document left its `static_ingest_state` row in `CLAIMED`, so the document was `SKIPPED` forever with partial vectors. On startup, `CLAIMED` rows are now reset to `FAILED` and re-ingested on the next run (unit tests + verified live in Docker).
+  - **Story 4 — Task 1 (Cross-encoder reranking):**
+    - `CohereRerankClient` (`POST /v2/rerank`, `rerank-v3.5`) on a dedicated `RestClient` with connect/read timeout `APP_RERANK_TIMEOUT_MS=3000` (new variable, documented in `.env.example`).
+    - `RerankService`: top `20` vector candidates → top `5`; graceful fallback to vector order with `fallbackReason` = `MISSING_API_KEY` / `API_ERROR` (4xx/5xx/429) / `TIMEOUT` / `INVALID_RESPONSE`.
+    - `CandidateRetriever`: vector search for top `20` chunks filtered by `is_latest == true` (typed filter expression). Interim candidate source until `retrieval-pre` hands over its fused candidates.
+    - Endpoint `POST /retrieval-post/rerank` with `400` (blank/too long query, malformed JSON) and `503` (vector search failure).
+    - Verified live in Docker: Cohere reorders candidates; invalid key (`401`) → `API_ERROR` fallback; empty key → `MISSING_API_KEY` fallback.
+  - **Story 4 — Task 2 (Neighbor stitching):**
+    - `NeighborStitchingService`: expands hits with `chunk_index ± 1` (same `doc_id` + `version`), merges adjacent chunks into contiguous passages and removes the ingestion overlap text (no duplicated content).
+    - `APP_TOKEN_BUDGET=2500` enforced with the same CL100K tokenizer as ingestion: hits first in rerank order, then neighbors; `totalTokens <= 2500` always. Neighbor lookup failure → hits only (`neighborsAvailable=false`).
+    - Endpoint `POST /retrieval-post/context` (vector search → rerank → stitched passages with pages, chunk indexes and scores). Verified live: e.g. RBAC query → 4 passages, `2222/2500` tokens, overlap text appears once.
+  - Code review fixes (local Claude review + Copilot): text-based neighbor lookup (malformed metadata cannot break stitching), per-document lookup fallback, overlap-aware token budget, `WARN` on invalid config values, shared `RetrievalPipeline` behind `/rerank` and `/context`, `APP_RERANK_TIMEOUT_MS` passed to the container in `docker-compose.yml`.
+  - Tests: `mvn test -pl retrieval-post` → `59/59` passing (success + failure/fallback paths for every component). Endpoints and rules documented in `retrieval-post/SPEC.md`.
+- **In Progress / To Do (Week 2):**
+  - Task 3: mandatory citations (`source`, `page`, `chunk_index`) + exact `"I don’t know."` fallback; answer generation with `gemini-3.5-flash-lite` on top of `POST /context`.
+  - Golden set `classpath:eval/golden-set.json` (`>= 35` Cloud/K8s questions incl. `10` out-of-scope).
+  - Agree the candidate contract with Alex (`retrieval-pre` output → `retrieval-post` input: `doc_id`, `version`, `source`, `page`, `chunk_index`, `content`, score) and add an endpoint accepting fused candidates.
+  - PR `feat/retrieval-post` → `main` with Laurențiu as reviewer.
+- **Blockers / Risks:**
+  - `APP_SIMILARITY_THRESHOLD=0.65` is too high for our scores. Live measurements: in-scope RBAC query → top `vectorScore 0.60`, top `rerankScore 0.33`; out-of-scope (cookie recipe) → `0.46` / `0.04`. With `0.65` even in-scope questions would return `"I don’t know."`. `rerankScore` separates in/out-of-scope much better than `vectorScore`, so Task 3 should gate on it (vector score only when Cohere falls back) and the threshold must be calibrated on the golden set (Week 3 calibration).
+  - Corpus has no official Kubernetes docs yet (only CNCF/AWS whitepapers + kubectl reference), which lowers scores for core K8s questions (e.g. RBAC) — depends on `ingest-dynamic` (Week 2).
+  - Token budget fills fast: chunks are ~400–500 tokens, so 5 hits use ~1700 of 2500 tokens and only ~2 neighbors fit; to revisit during calibration.

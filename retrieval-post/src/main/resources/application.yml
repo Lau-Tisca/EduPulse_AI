@@ -50,6 +50,7 @@ app:
     top-k: ${APP_RERANK_TOP_K:5}
     cohere-api-key: ${COHERE_API_KEY:}
     model: ${APP_RERANK_MODEL:rerank-v3.5}
+    timeout-ms: ${APP_RERANK_TIMEOUT_MS:3000}
   token-budget: ${APP_TOKEN_BUDGET:2500}
   similarity-threshold: ${APP_SIMILARITY_THRESHOLD:0.65}
   eval:
