@@ -65,6 +65,36 @@ curl -X POST http://localhost:8080/retrieval-post/rerank \
 - Expand top chunks with adjacent sibling chunks (`chunk_index - 1`, `chunk_index + 1`) for the same `doc_id` and `version`.
 - Deduplicate overlapping chunks and respect `APP_TOKEN_BUDGET=2500` max context tokens.
 
+#### Endpoint: `POST /context` (via gateway: `POST http://localhost:8080/retrieval-post/context`)
+Vector search → Cohere rerank → neighbor stitching. Returns the budget-bounded context that answer generation (Task 3) will use.
+
+```bash
+curl -X POST http://localhost:8080/retrieval-post/context \
+  -H "Content-Type: application/json" \
+  -d '{"query":"How does Kubernetes RBAC work?"}'
+```
+
+```json
+{
+  "query": "How does Kubernetes RBAC work?",
+  "reranked": true, "fallbackReason": null, "model": "rerank-v3.5", "candidates": 20,
+  "tokenBudget": 2500, "totalTokens": 2222, "droppedHits": 0, "neighborsAvailable": true,
+  "passages": [
+    { "rank": 1, "docId": "cncf-cloud-native-security-whitepaper", "version": 1,
+      "source": "cncf-cloud-native-security-whitepaper.pdf", "pages": [28, 29],
+      "chunkIndexes": [33, 34], "anchorChunkIndexes": [34],
+      "rerankScore": 0.33, "vectorScore": 0.60, "tokenCount": 576, "text": "…" }
+  ]
+}
+```
+
+**Stitching rules**
+- Neighbors (`chunk_index ± 1`, same `doc_id` + `version`) are loaded by position from `vector_store` (no embedding call).
+- Adjacent/overlapping chunks are merged into one contiguous passage; each chunk appears once and the text repeated by ingestion overlap (`APP_CHUNK_OVERLAP`) is removed when joining.
+- Token budget (`APP_TOKEN_BUDGET`, counted with the same CL100K tokenizer as ingestion): reranked hits first in rank order (a hit that does not fit is dropped whole → `droppedHits`), then neighbors in the order of their hit's rank. `totalTokens <= tokenBudget` always.
+- If the neighbor lookup fails, the hits are returned without neighbors and `neighborsAvailable=false`.
+- Passages are ordered by `rank` (best rerank position of the hits they contain).
+
 ### Task 3 — Mandatory Citations & `"I don’t know."` Fallback
 - If the maximum similarity/relevance score is below `APP_SIMILARITY_THRESHOLD=0.65` (or no relevant context passes threshold), skip LLM generation and return the exact string `"I don’t know."`.
 - Otherwise, generate a concise grounded answer via `gemini-3.5-flash-lite` with mandatory inline citations (`doc_id`, `source`, `page`/`chunk_index`).

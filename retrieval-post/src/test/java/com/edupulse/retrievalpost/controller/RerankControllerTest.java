@@ -119,7 +119,7 @@ class RerankControllerTest {
 
     @Test
     void rejectsTooLongQueryWith400() throws Exception {
-        String longQuery = "k".repeat(RerankController.MAX_QUERY_LENGTH + 1);
+        String longQuery = "k".repeat(QueryValidator.MAX_QUERY_LENGTH + 1);
 
         mockMvc.perform(post("/rerank")
                         .contentType(MediaType.APPLICATION_JSON)
