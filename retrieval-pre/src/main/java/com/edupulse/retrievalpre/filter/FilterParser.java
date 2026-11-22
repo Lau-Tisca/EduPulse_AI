@@ -74,8 +74,9 @@ public class FilterParser {
         }
 
         // A comma means several values -> IN; otherwise a single value -> EQ.
+        // The -1 keeps empty items at the end, so "3,4," is rejected like "3,,4".
         List<String> values = new ArrayList<>();
-        for (String part : rawValue.split(",")) {
+        for (String part : rawValue.split(",", -1)) {
             String value = part.trim();
             if (value.isEmpty()) {
                 throw error("Empty value in list for field '" + field.key() + "'");

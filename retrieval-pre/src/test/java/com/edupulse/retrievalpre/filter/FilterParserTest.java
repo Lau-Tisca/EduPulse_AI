@@ -134,6 +134,20 @@ class FilterParserTest {
     }
 
     @Test
+    void trailingEmptyItemInListIsRejected() {
+        assertThatThrownBy(() -> parser.parse(params("page", "3,4,")))
+                .isInstanceOf(InvalidFilterException.class)
+                .hasMessageContaining("Empty value in list");
+    }
+
+    @Test
+    void leadingEmptyItemInListIsRejected() {
+        assertThatThrownBy(() -> parser.parse(params("page", ",3")))
+                .isInstanceOf(InvalidFilterException.class)
+                .hasMessageContaining("Empty value in list");
+    }
+
+    @Test
     void tooManyValuesAreRejected() {
         String twentyOne = String.join(",", java.util.Collections.nCopies(21, "1"));
 

@@ -21,7 +21,7 @@ public class FilterExceptionHandler {
 
     @ExceptionHandler(InvalidFilterException.class)
     public ResponseEntity<Map<String, Object>> handleInvalidFilter(InvalidFilterException e) {
-        log.warn("Invalid filter rejected: {}", e.getMessage());
+        log.warn("Invalid filter rejected: {}", forLog(e.getMessage()));
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("status", 400);
@@ -30,5 +30,10 @@ public class FilterExceptionHandler {
         body.put("validFields", e.validFields());
         body.put("validOperators", e.validOperators());
         return ResponseEntity.badRequest().body(body);
+    }
+
+    // The message can contain text from the URL: remove new lines so nobody can fake log lines.
+    private static String forLog(String text) {
+        return text == null ? "" : text.replace('\n', ' ').replace('\r', ' ');
     }
 }
