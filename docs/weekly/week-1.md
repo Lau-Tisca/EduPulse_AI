@@ -23,9 +23,10 @@
   - Local setup: pulled `main`, created branch `feat/retrieval-pre`, configured `.env` (Google AI Studio API key).
   - Started the full stack with `docker compose up -d --build`; all containers `healthy`, health checks via the gateway return `UP` for all 4 services (ingest-static, ingest-dynamic, retrieval-pre, retrieval-post).
   - Ran `POST /ingest/static`; the 4 Cloud/K8s PDFs are indexed in `pgvector`. Verified directly in the DB: `385` chunks in `vector_store`, and a re-run returns `SKIPPED` for all 4 files (idempotent ingestion).
+  - Story 3 Task 1 (safe metadata filtering): `FilterParser` + `ValidatedFilter` with field/operator allowlists, HTTP 400 JSON listing valid fields and operators, default `is_latest=true`, endpoint `GET /filters/validate`, unit tests (success + failure) and Postman collection.
 - **In Progress / To Do:**
   - Implement **Story 3 Complete (`retrieval-pre`: Tasks 1, 2, 3, 4)** per `retrieval-pre/SPEC.md` & `epic1_team_plan.md`:
-    - Task 1: Safe metadata filtering (`ValidatedFilter` with field/operator allowlists, `400 Bad Request` on invalid input, `is_latest=true` default, Postman collection at `retrieval-pre/postman/retrieval-pre-filters.postman_collection.json`).
+    - Task 1 (DONE, see above): Safe metadata filtering (`ValidatedFilter` with field/operator allowlists, `400 Bad Request` on invalid input, `is_latest=true` default, Postman collection at `retrieval-pre/postman/retrieval-pre-filters.postman_collection.json`).
     - Task 2: ReDoS-safe query normalization (`static final Pattern`, raw query logging, `>= 15` parameterized JUnit cases + adversarial `< 50ms` timing test).
     - Task 3: External acronym expansion loaded from `classpath:acronyms.yml` (`K8s`, `CNI`, `RBAC`, `PVC`, `HPA`, `CRD`, `OCI`, `TLS`).
     - Task 4: Multi-query expansion (`APP_MULTI_QUERY_VARIANTS=3`, `1500ms` timeout with fallback) and Reciprocal Rank Fusion (RRF).
