@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.stereotype.Component;
+
 /**
  * Turns the URL parameters into a {@link ValidatedFilter}.
  *
@@ -14,6 +16,7 @@ import java.util.Map;
  *
  * Anything that is not an allowed field (or "logic") is rejected.
  */
+@Component
 public class FilterParser {
 
     private static final String LOGIC_PARAM = "logic";
