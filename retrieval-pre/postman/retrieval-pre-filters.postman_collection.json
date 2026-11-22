@@ -1,0 +1,345 @@
+{
+  "info": {
+    "name": "retrieval-pre — Filters & Query Normalization (Story 3, Tasks 1-2)",
+    "description": "Tests for GET /retrieval-pre/filters/validate (Task 1) and GET /retrieval-pre/query/normalize (Task 2) through the API gateway. Start the stack first: docker compose up -d --build",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    }
+  ],
+  "item": [
+    {
+      "name": "No filter -> default is_latest=true (200)",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/retrieval-pre/filters/validate",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "retrieval-pre",
+            "filters",
+            "validate"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "pm.test('default filter is is_latest = true', () => {",
+              "  pm.expect(body.conditions[0].field).to.eql('is_latest');",
+              "  pm.expect(body.conditions[0].values).to.eql(['true']);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Single value -> EQ (200)",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/retrieval-pre/filters/validate?source=kubectl-quick-reference",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "retrieval-pre",
+            "filters",
+            "validate"
+          ],
+          "query": [
+            {
+              "key": "source",
+              "value": "kubectl-quick-reference"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', () => pm.response.to.have.status(200));",
+              "const c = pm.response.json().conditions[0];",
+              "pm.test('EQ on source', () => {",
+              "  pm.expect(c.field).to.eql('source');",
+              "  pm.expect(c.operator).to.eql('EQ');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Several values + OR -> IN (200)",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/retrieval-pre/filters/validate?source=kubectl-quick-reference&page=3,4&logic=OR",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "retrieval-pre",
+            "filters",
+            "validate"
+          ],
+          "query": [
+            {
+              "key": "source",
+              "value": "kubectl-quick-reference"
+            },
+            {
+              "key": "page",
+              "value": "3,4"
+            },
+            {
+              "key": "logic",
+              "value": "OR"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "pm.test('logic is OR with 2 conditions', () => {",
+              "  pm.expect(body.logic).to.eql('OR');",
+              "  pm.expect(body.conditions.length).to.eql(2);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Unknown field -> 400 with valid fields",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/retrieval-pre/filters/validate?password=x",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "retrieval-pre",
+            "filters",
+            "validate"
+          ],
+          "query": [
+            {
+              "key": "password",
+              "value": "x"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 400', () => pm.response.to.have.status(400));",
+              "const body = pm.response.json();",
+              "pm.test('lists valid fields and operators', () => {",
+              "  pm.expect(body.validFields).to.include('doc_id');",
+              "  pm.expect(body.validOperators).to.include('EQ');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Non-numeric page -> 400",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/retrieval-pre/filters/validate?page=abc",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "retrieval-pre",
+            "filters",
+            "validate"
+          ],
+          "query": [
+            {
+              "key": "page",
+              "value": "abc"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 400', () => pm.response.to.have.status(400));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Invalid logic -> 400",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/retrieval-pre/filters/validate?source=x&logic=XOR",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "retrieval-pre",
+            "filters",
+            "validate"
+          ],
+          "query": [
+            {
+              "key": "source",
+              "value": "x"
+            },
+            {
+              "key": "logic",
+              "value": "XOR"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 400', () => pm.response.to.have.status(400));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Normalize: polite question (200)",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/retrieval-pre/query/normalize?q=Hi, can you please tell me how HPA works?",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "retrieval-pre",
+            "query",
+            "normalize"
+          ],
+          "query": [
+            {
+              "key": "q",
+              "value": "Hi, can you please tell me how HPA works?"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "pm.test('polite prefix and ? removed', () => pm.expect(body.normalized).to.eql('how HPA works'));",
+              "pm.test('raw query is kept', () => pm.expect(body.raw).to.eql('Hi, can you please tell me how HPA works?'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Normalize: already clean query is unchanged (200)",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/retrieval-pre/query/normalize?q=What is a pod",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "retrieval-pre",
+            "query",
+            "normalize"
+          ],
+          "query": [
+            {
+              "key": "q",
+              "value": "What is a pod"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 200', () => pm.response.to.have.status(200));",
+              "pm.test('unchanged', () => pm.expect(pm.response.json().normalized).to.eql('What is a pod'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Normalize: missing q -> 400",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/retrieval-pre/query/normalize",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "retrieval-pre",
+            "query",
+            "normalize"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 400', () => pm.response.to.have.status(400));"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
