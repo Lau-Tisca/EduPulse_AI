@@ -82,7 +82,7 @@ class DynamicIngestServiceTest {
         String url = "https://raw.githubusercontent.com/kubernetes/website/main/pods.md";
         when(remoteContentFetcher.fetch(url)).thenReturn(new FetchedContent(url, "text/markdown", bytes));
         when(versionRepository.findVersionSnapshot("k8s-pods")).thenReturn(Optional.empty());
-        when(versionRepository.tryClaim(eq("k8s-pods"), eq(1), anyString())).thenReturn(true);
+        when(versionRepository.tryClaim(eq("k8s-pods"), eq(1), anyString())).thenReturn(Optional.of("tok-1"));
 
         DynamicIngestResult result = service.ingestUrl(url, "k8s-pods");
 
@@ -103,7 +103,7 @@ class DynamicIngestServiceTest {
                 .containsEntry("checksum", checksumService.sha256(bytes))
                 .containsEntry("is_latest", false); // written invisible before atomic cutover
 
-        verify(versionRepository).activateVersion("k8s-pods", 1, checksumService.sha256(bytes));
+        verify(versionRepository).activateVersion("k8s-pods", 1, checksumService.sha256(bytes), "tok-1");
     }
 
     @Test
@@ -119,7 +119,7 @@ class DynamicIngestServiceTest {
         assertThat(result.version()).isEqualTo(1);
         assertThat(result.chunksCreated()).isZero();
         verify(batchWriter, never()).addAll(any(), anyString());
-        verify(versionRepository, never()).activateVersion(anyString(), anyInt(), anyString());
+        verify(versionRepository, never()).activateVersion(anyString(), anyInt(), anyString(), anyString());
     }
 
     @Test
@@ -128,14 +128,14 @@ class DynamicIngestServiceTest {
         String newChecksum = checksumService.sha256(updatedBytes);
         when(versionRepository.findVersionSnapshot("k8s-rbac"))
                 .thenReturn(Optional.of(new VersionSnapshot(1, 1, "old-checksum-v1")));
-        when(versionRepository.tryClaim("k8s-rbac", 2, newChecksum)).thenReturn(true);
+        when(versionRepository.tryClaim("k8s-rbac", 2, newChecksum)).thenReturn(Optional.of("tok-2"));
 
         DynamicIngestResult result = service.ingestPayload("k8s-rbac", "https://kubernetes.io/rbac", "text/markdown", updatedBytes);
 
         assertThat(result.status()).isEqualTo(DynamicIngestResult.STATUS_UPDATED);
         assertThat(result.version()).isEqualTo(2);
         assertThat(result.previousVersion()).isEqualTo(1);
-        verify(versionRepository).activateVersion("k8s-rbac", 2, newChecksum);
+        verify(versionRepository).activateVersion("k8s-rbac", 2, newChecksum, "tok-2");
     }
 
     @Test
@@ -144,14 +144,14 @@ class DynamicIngestServiceTest {
         String newChecksum = checksumService.sha256(updatedBytes);
         when(versionRepository.findVersionSnapshot("k8s-rbac"))
                 .thenReturn(Optional.of(new VersionSnapshot(1, 1, "old-checksum-v1")));
-        when(versionRepository.tryClaim("k8s-rbac", 2, newChecksum)).thenReturn(true);
+        when(versionRepository.tryClaim("k8s-rbac", 2, newChecksum)).thenReturn(Optional.of("tok-2"));
         doThrow(new RuntimeException("Embedding API error")).when(batchWriter).addAll(any(), eq("k8s-rbac"));
 
         assertThatThrownBy(() -> service.ingestPayload("k8s-rbac", "https://kubernetes.io/rbac", "text/markdown", updatedBytes))
                 .isInstanceOf(RuntimeException.class);
 
-        verify(versionRepository).rollbackFailedVersion("k8s-rbac", 2, newChecksum);
-        verify(versionRepository, never()).activateVersion(anyString(), anyInt(), anyString());
+        verify(versionRepository).rollbackFailedVersion("k8s-rbac", 2, newChecksum, "tok-2");
+        verify(versionRepository, never()).activateVersion(anyString(), anyInt(), anyString(), anyString());
     }
 
     @Test
@@ -171,14 +171,14 @@ class DynamicIngestServiceTest {
         // Simulate partial crashed v1 rows (is_latest=false only -> latestVersion=null, latestChecksum=null).
         when(versionRepository.findVersionSnapshot("crashed-doc"))
                 .thenReturn(Optional.of(new VersionSnapshot(null, 1, null)));
-        when(versionRepository.tryClaim("crashed-doc", 2, checksum)).thenReturn(true);
+        when(versionRepository.tryClaim("crashed-doc", 2, checksum)).thenReturn(Optional.of("tok-rec"));
 
         DynamicIngestResult result = service.ingestPayload("crashed-doc", "crashed-doc.md", "text/markdown", bytes);
 
         assertThat(result.status()).isEqualTo(DynamicIngestResult.STATUS_INGESTED);
         assertThat(result.version()).isEqualTo(2);
         assertThat(result.previousVersion()).isNull();
-        verify(versionRepository).activateVersion("crashed-doc", 2, checksum);
+        verify(versionRepository).activateVersion("crashed-doc", 2, checksum, "tok-rec");
     }
 
     @Test
@@ -186,7 +186,7 @@ class DynamicIngestServiceTest {
         byte[] bytes = "# Concurrent Update".getBytes(StandardCharsets.UTF_8);
         String checksum = checksumService.sha256(bytes);
         when(versionRepository.findVersionSnapshot("k8s-rbac")).thenReturn(Optional.empty());
-        when(versionRepository.tryClaim("k8s-rbac", 1, checksum)).thenReturn(false);
+        when(versionRepository.tryClaim("k8s-rbac", 1, checksum)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.ingestPayload("k8s-rbac", "https://kubernetes.io/rbac", "text/markdown", bytes))
                 .isInstanceOf(IngestionConflictException.class);
@@ -198,10 +198,10 @@ class DynamicIngestServiceTest {
         byte[] bytes = "# RBAC v2".getBytes(StandardCharsets.UTF_8);
         String checksum = checksumService.sha256(bytes);
         when(versionRepository.findVersionSnapshot("k8s-rbac")).thenReturn(Optional.empty());
-        when(versionRepository.tryClaim("k8s-rbac", 1, checksum)).thenReturn(true);
+        when(versionRepository.tryClaim("k8s-rbac", 1, checksum)).thenReturn(Optional.of("tok-fail"));
         doThrow(new IllegalStateException("root embedding error")).when(batchWriter).addAll(any(), eq("k8s-rbac"));
         doThrow(new RuntimeException("db rollback failed"))
-                .when(versionRepository).rollbackFailedVersion("k8s-rbac", 1, checksum);
+                .when(versionRepository).rollbackFailedVersion("k8s-rbac", 1, checksum, "tok-fail");
 
         assertThatThrownBy(() -> service.ingestPayload("k8s-rbac", "https://kubernetes.io/rbac", "text/markdown", bytes))
                 .isInstanceOf(IllegalStateException.class)

@@ -197,12 +197,14 @@ public class DynamicIngestService {
             Integer previousVersion = existingOpt.map(VersionSnapshot::latestVersion).orElse(null);
             int targetVersion = existingOpt.map(s -> s.maxVersion() + 1).orElse(1);
 
-            if (!versionRepository.tryClaim(docId, targetVersion, checksum)) {
+            Optional<String> claimTokenOpt = versionRepository.tryClaim(docId, targetVersion, checksum);
+            if (claimTokenOpt.isEmpty()) {
                 log.warn("Dynamic ingestion claim conflict: docId={}, targetVersion={}, checksum={}",
                         sanitize(docId), targetVersion, checksum);
                 throw new IngestionConflictException(
                         "Ingestion for document '" + docId + "' is already in progress");
             }
+            String claimToken = claimTokenOpt.get();
 
             log.info("Starting dynamic ingestion: docId={}, source={}, targetVersion={}, previousVersion={}, sizeBytes={}",
                     sanitize(docId), sanitize(source), targetVersion, previousVersion, bytes.length);
@@ -215,7 +217,7 @@ public class DynamicIngestService {
                     throw new ContentParseException("Document produced zero chunks after splitting: " + source);
                 }
                 batchWriter.addAll(chunks, docId);
-                versionRepository.activateVersion(docId, targetVersion, checksum);
+                versionRepository.activateVersion(docId, targetVersion, checksum, claimToken);
 
                 String status = previousVersion == null
                         ? DynamicIngestResult.STATUS_INGESTED
@@ -242,7 +244,7 @@ public class DynamicIngestService {
                 );
             } catch (Throwable ex) {
                 try {
-                    versionRepository.rollbackFailedVersion(docId, targetVersion, checksum);
+                    versionRepository.rollbackFailedVersion(docId, targetVersion, checksum, claimToken);
                 } catch (Exception rollbackEx) {
                     log.error("Failed to roll back partial dynamic ingestion version {}: docId={}, checksum={}",
                             targetVersion, sanitize(docId), checksum, rollbackEx);

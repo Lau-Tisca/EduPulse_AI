@@ -96,20 +96,20 @@ public class WebhookProcessingService {
 
         try {
             DynamicIngestResult result = dynamicIngestService.ingestUrl(job.url(), job.docId());
-            retryRepository.markCompleted(job.id());
+            retryRepository.markCompleted(job.id(), job.leaseToken());
             log.info("Webhook job completed: jobId={}, attempt={}/{}, docId={}, status={}, version={}, chunks={}",
                     job.id(), attempt, job.maxAttempts(), result.docId(), result.status(),
                     result.version(), result.chunksCreated());
         } catch (RuntimeException ex) {
             String error = ex.getMessage() == null ? ex.getClass().getSimpleName() : ex.getMessage();
             if (isPermanentFailure(ex) || attempt >= job.maxAttempts()) {
-                retryRepository.markDeadLetter(job.id(), attempt, error);
+                retryRepository.markDeadLetter(job.id(), job.leaseToken(), attempt, error);
                 log.warn("Webhook job moved to DEAD_LETTER: jobId={}, attempt={}/{}, url={}, reason={}",
                         job.id(), attempt, job.maxAttempts(), sanitize(job.url()), sanitize(error));
             } else {
                 long delaySeconds = BASE_BACKOFF_SECONDS * (1L << Math.min(attempt - 1, 5));
                 Instant nextRetryAt = Instant.now().plusSeconds(delaySeconds);
-                retryRepository.scheduleRetry(job.id(), attempt, nextRetryAt, error);
+                retryRepository.scheduleRetry(job.id(), job.leaseToken(), attempt, nextRetryAt, error);
                 log.warn("Webhook job failed; scheduled retry: jobId={}, attempt={}/{}, nextRetryInSec={}, url={}, reason={}",
                         job.id(), attempt, job.maxAttempts(), delaySeconds, sanitize(job.url()), sanitize(error));
             }

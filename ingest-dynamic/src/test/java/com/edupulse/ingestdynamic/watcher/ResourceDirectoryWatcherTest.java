@@ -101,11 +101,6 @@ class ResourceDirectoryWatcherTest {
         Path watchedDir = Files.createDirectories(tempDir.resolve("watched"));
         Path outsideSecret = Files.writeString(tempDir.resolve("secret.txt"), "DB_PASSWORD=supersecret");
         Path symlink = watchedDir.resolve("leak.txt");
-        try {
-            Files.createSymbolicLink(symlink, outsideSecret);
-        } catch (UnsupportedOperationException | java.io.IOException ex) {
-            org.junit.jupiter.api.Assumptions.assumeTrue(false, "Symlink creation requires elevated privileges on this OS");
-        }
 
         IngestDynamicProperties props = new IngestDynamicProperties(
                 512,
@@ -115,7 +110,16 @@ class ResourceDirectoryWatcherTest {
                 new IngestDynamicProperties.Webhook("secret")
         );
         DynamicIngestService ingestService = mock(DynamicIngestService.class);
-        ResourceDirectoryWatcher watcher = new ResourceDirectoryWatcher(props, ingestService);
+        ResourceDirectoryWatcher watcher;
+        try {
+            Files.createSymbolicLink(symlink, outsideSecret);
+            watcher = new ResourceDirectoryWatcher(props, ingestService);
+        } catch (UnsupportedOperationException | java.io.IOException ex) {
+            // Unprivileged Windows disallows OS symlink creation; still exercise the watcher's
+            // exact symlink-rejection branch without skipping the test.
+            Files.writeString(symlink, "simulated-symlink-entry");
+            watcher = new ResourceDirectoryWatcher(props, ingestService, path -> path.equals(symlink));
+        }
 
         assertThat(watcher.scanNow()).isZero();
         verify(ingestService, never()).ingestLocalFile(any());

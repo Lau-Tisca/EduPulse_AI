@@ -14,9 +14,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -40,14 +42,25 @@ public class ResourceDirectoryWatcher {
 
     private final IngestDynamicProperties properties;
     private final DynamicIngestService dynamicIngestService;
+    private final Predicate<Path> symlinkDetector;
     private final AtomicBoolean scanning = new AtomicBoolean(false);
 
+    @Autowired
     public ResourceDirectoryWatcher(
             IngestDynamicProperties properties,
             DynamicIngestService dynamicIngestService
     ) {
+        this(properties, dynamicIngestService, Files::isSymbolicLink);
+    }
+
+    ResourceDirectoryWatcher(
+            IngestDynamicProperties properties,
+            DynamicIngestService dynamicIngestService,
+            Predicate<Path> symlinkDetector
+    ) {
         this.properties = properties;
         this.dynamicIngestService = dynamicIngestService;
+        this.symlinkDetector = symlinkDetector;
     }
 
     @Scheduled(
@@ -87,7 +100,7 @@ public class ResourceDirectoryWatcher {
                     .sorted(Comparator.comparing(path -> path.getFileName().toString()))
                     .toList();
             for (Path entry : listed) {
-                if (Files.isSymbolicLink(entry)) {
+                if (symlinkDetector.test(entry)) {
                     log.warn("File watcher skipped symbolic link in resources directory: {}", entry.getFileName());
                     continue;
                 }

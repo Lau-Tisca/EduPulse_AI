@@ -127,14 +127,14 @@ class WebhookProcessingAndParserTest {
         WebhookRetryRepository repo = mock(WebhookRetryRepository.class);
         DynamicIngestService ingestService = mock(DynamicIngestService.class);
 
-        WebhookJob conflictJob = new WebhookJob(4L, "https://kubernetes.io/busy", "busy", "PROCESSING", 0, 3, Instant.now(), null);
+        WebhookJob conflictJob = new WebhookJob(4L, "https://kubernetes.io/busy", "busy", "PROCESSING", 0, 3, Instant.now(), null, "lease-4");
         when(repo.claimJob(4L)).thenReturn(Optional.of(conflictJob));
         when(ingestService.ingestUrl("https://kubernetes.io/busy", "busy"))
                 .thenThrow(new IngestionConflictException("already in progress"));
 
         WebhookProcessingService directService = new WebhookProcessingService(repo, ingestService, Runnable::run);
         directService.processJob(4L);
-        verify(repo).scheduleRetry(eq(4L), eq(1), any(Instant.class), eq("already in progress"));
+        verify(repo).scheduleRetry(eq(4L), eq("lease-4"), eq(1), any(Instant.class), eq("already in progress"));
 
         // Saturated executor should NOT abort enqueueAndDispatch or throw 500.
         Executor rejectingExecutor = cmd -> {
@@ -159,30 +159,30 @@ class WebhookProcessingAndParserTest {
         WebhookProcessingService service = new WebhookProcessingService(repo, ingestService, directExecutor);
 
         // 1. Success path
-        WebhookJob okJob = new WebhookJob(1L, "https://kubernetes.io/ok", "ok", "PROCESSING", 0, 3, Instant.now(), null);
+        WebhookJob okJob = new WebhookJob(1L, "https://kubernetes.io/ok", "ok", "PROCESSING", 0, 3, Instant.now(), null, "lease-1");
         when(repo.claimJob(1L)).thenReturn(Optional.of(okJob));
         when(ingestService.ingestUrl("https://kubernetes.io/ok", "ok")).thenReturn(new DynamicIngestResult(
                 "ok", "https://kubernetes.io/ok", "abc", 1, null, 1, 2, DynamicIngestResult.STATUS_INGESTED, "ok"));
 
         service.processJob(1L);
-        verify(repo).markCompleted(1L);
+        verify(repo).markCompleted(1L, "lease-1");
 
         // 2. Transient failure -> scheduled retry
-        WebhookJob retryJob = new WebhookJob(2L, "https://kubernetes.io/flaky", null, "PROCESSING", 0, 3, Instant.now(), null);
+        WebhookJob retryJob = new WebhookJob(2L, "https://kubernetes.io/flaky", null, "PROCESSING", 0, 3, Instant.now(), null, "lease-2");
         when(repo.claimJob(2L)).thenReturn(Optional.of(retryJob));
         when(ingestService.ingestUrl("https://kubernetes.io/flaky", null))
                 .thenThrow(new RemoteFetchException(HttpStatus.GATEWAY_TIMEOUT, "timeout"));
 
         service.processJob(2L);
-        verify(repo).scheduleRetry(eq(2L), eq(1), any(Instant.class), eq("timeout"));
+        verify(repo).scheduleRetry(eq(2L), eq("lease-2"), eq(1), any(Instant.class), eq("timeout"));
 
         // 3. Permanent SSRF block -> immediate DEAD_LETTER without retrying
-        WebhookJob ssrfJob = new WebhookJob(3L, "http://169.254.169.254/latest/meta-data/", null, "PROCESSING", 0, 3, Instant.now(), null);
+        WebhookJob ssrfJob = new WebhookJob(3L, "http://169.254.169.254/latest/meta-data/", null, "PROCESSING", 0, 3, Instant.now(), null, "lease-3");
         when(repo.claimJob(3L)).thenReturn(Optional.of(ssrfJob));
         when(ingestService.ingestUrl("http://169.254.169.254/latest/meta-data/", null))
                 .thenThrow(new SsrfBlockedException("Only HTTPS URLs are permitted"));
 
         service.processJob(3L);
-        verify(repo).markDeadLetter(eq(3L), eq(1), anyString());
+        verify(repo).markDeadLetter(eq(3L), eq("lease-3"), eq(1), anyString());
     }
 }

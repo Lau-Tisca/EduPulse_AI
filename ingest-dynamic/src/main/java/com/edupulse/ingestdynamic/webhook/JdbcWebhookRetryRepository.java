@@ -4,7 +4,10 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -15,6 +18,8 @@ import org.springframework.stereotype.Repository;
  */
 @Repository
 public class JdbcWebhookRetryRepository implements WebhookRetryRepository {
+
+    private static final Logger log = LoggerFactory.getLogger(JdbcWebhookRetryRepository.class);
 
     private final JdbcTemplate jdbcTemplate;
     private final AtomicBoolean queueTableInitialized = new AtomicBoolean(false);
@@ -40,16 +45,19 @@ public class JdbcWebhookRetryRepository implements WebhookRetryRepository {
     @Override
     public Optional<WebhookJob> claimJob(long jobId) {
         ensureQueueTable();
+        String leaseToken = UUID.randomUUID().toString();
         try {
             WebhookJob job = jdbcTemplate.queryForObject("""
                     UPDATE webhook_retry_queue
-                    SET status = 'PROCESSING', updated_at = CURRENT_TIMESTAMP
+                    SET status = 'PROCESSING',
+                        lease_token = ?,
+                        updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
                       AND (
                             (status IN ('PENDING', 'RETRY_PENDING') AND next_retry_at <= CURRENT_TIMESTAMP)
                             OR (status = 'PROCESSING' AND updated_at < CURRENT_TIMESTAMP - INTERVAL '15 minutes')
                       )
-                    RETURNING id, url, doc_id, status, attempts, max_attempts, next_retry_at, last_error
+                    RETURNING id, url, doc_id, status, attempts, max_attempts, next_retry_at, last_error, lease_token
                     """,
                     (rs, rowNum) -> new WebhookJob(
                             rs.getLong("id"),
@@ -59,9 +67,10 @@ public class JdbcWebhookRetryRepository implements WebhookRetryRepository {
                             rs.getInt("attempts"),
                             rs.getInt("max_attempts"),
                             rs.getTimestamp("next_retry_at").toInstant(),
-                            rs.getString("last_error")
+                            rs.getString("last_error"),
+                            rs.getString("lease_token")
                     ),
-                    jobId);
+                    leaseToken, jobId);
             return Optional.ofNullable(job);
         } catch (EmptyResultDataAccessException ex) {
             return Optional.empty();
@@ -82,48 +91,69 @@ public class JdbcWebhookRetryRepository implements WebhookRetryRepository {
     }
 
     @Override
-    public void markCompleted(long jobId) {
-        jdbcTemplate.update("""
+    public void markCompleted(long jobId, String leaseToken) {
+        int updated = jdbcTemplate.update("""
                 UPDATE webhook_retry_queue
-                SET status = 'COMPLETED', last_error = NULL, updated_at = CURRENT_TIMESTAMP
+                SET status = 'COMPLETED', last_error = NULL, lease_token = NULL, updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
-                """, jobId);
+                  AND status = 'PROCESSING'
+                  AND lease_token = ?
+                """, jobId, leaseToken);
+        if (updated == 0) {
+            log.warn("Skipped markCompleted for stale/superseded webhook lease: jobId={}", jobId);
+        }
     }
 
     @Override
-    public void scheduleRetry(long jobId, int attempts, Instant nextRetryAt, String lastError) {
-        jdbcTemplate.update("""
+    public void scheduleRetry(long jobId, String leaseToken, int attempts, Instant nextRetryAt, String lastError) {
+        int updated = jdbcTemplate.update("""
                 UPDATE webhook_retry_queue
                 SET status = 'RETRY_PENDING',
                     attempts = ?,
                     next_retry_at = ?,
                     last_error = ?,
+                    lease_token = NULL,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
-                """, attempts, Timestamp.from(nextRetryAt), truncateError(lastError), jobId);
+                  AND status = 'PROCESSING'
+                  AND lease_token = ?
+                """, attempts, Timestamp.from(nextRetryAt), truncateError(lastError), jobId, leaseToken);
+        if (updated == 0) {
+            log.warn("Skipped scheduleRetry for stale/superseded webhook lease: jobId={}", jobId);
+        }
     }
 
     @Override
-    public void markDeadLetter(long jobId, int attempts, String lastError) {
-        jdbcTemplate.update("""
+    public void markDeadLetter(long jobId, String leaseToken, int attempts, String lastError) {
+        int updated = jdbcTemplate.update("""
                 UPDATE webhook_retry_queue
                 SET status = 'DEAD_LETTER',
                     attempts = ?,
                     last_error = ?,
+                    lease_token = NULL,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
-                """, attempts, truncateError(lastError), jobId);
+                  AND status = 'PROCESSING'
+                  AND lease_token = ?
+                """, attempts, truncateError(lastError), jobId, leaseToken);
+        if (updated == 0) {
+            log.warn("Skipped markDeadLetter for stale/superseded webhook lease: jobId={}", jobId);
+        }
     }
 
     @Override
     public int resetStuckProcessing() {
         ensureQueueTable();
+        // Restrict startup recovery to stale (>15m) PROCESSING leases so a restarting replica never
+        // requeues jobs actively executing on another healthy instance.
         return jdbcTemplate.update("""
                 UPDATE webhook_retry_queue
                 SET status = 'RETRY_PENDING',
+                    lease_token = NULL,
                     next_retry_at = CURRENT_TIMESTAMP,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE status = 'PROCESSING'
+                  AND updated_at < CURRENT_TIMESTAMP - INTERVAL '15 minutes'
                 """);
     }
 
@@ -141,9 +171,14 @@ public class JdbcWebhookRetryRepository implements WebhookRetryRepository {
                     max_attempts INT NOT NULL DEFAULT 3,
                     next_retry_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     last_error TEXT,
+                    lease_token VARCHAR(64),
                     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
+                """);
+        jdbcTemplate.execute("""
+                ALTER TABLE webhook_retry_queue
+                ADD COLUMN IF NOT EXISTS lease_token VARCHAR(64)
                 """);
         queueTableInitialized.set(true);
     }
