@@ -122,6 +122,21 @@ public class StaticIngestService {
         String docId = deriveDocId(customDocId, source);
         String checksum = checksumService.sha256(pdfBytes);
 
+        if (checksumRepository.hasActiveIndexedVersion(docId)) {
+            log.info("Skipping static PDF ingestion (already active/versioned in vector_store; use ingest-dynamic for updates): docId={}, source={}",
+                    docId, source);
+            return new StaticIngestItemResult(
+                    docId,
+                    source,
+                    checksum,
+                    INITIAL_VERSION,
+                    0,
+                    0,
+                    StaticIngestItemResult.STATUS_SKIPPED,
+                    "Document already has an active indexed version; use ingest-dynamic for versioned updates."
+            );
+        }
+
         if (!checksumRepository.tryClaim(docId, checksum)) {
             log.info("Skipping static PDF ingestion (unchanged): docId={}, source={}, checksum={}",
                     docId, source, checksum);

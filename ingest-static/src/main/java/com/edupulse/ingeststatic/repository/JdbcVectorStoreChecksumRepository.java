@@ -21,8 +21,33 @@ public class JdbcVectorStoreChecksumRepository implements VectorStoreChecksumRep
     }
 
     @Override
+    public boolean hasActiveIndexedVersion(String docId) {
+        ensureStateTable();
+        Integer count = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM vector_store v
+                WHERE v.metadata->>'doc_id' = ?
+                  AND (
+                        (v.metadata->>'version' IS NOT NULL AND v.metadata->>'version' <> '1')
+                        OR (
+                             v.metadata->>'is_latest' = 'true'
+                             AND NOT EXISTS (
+                                 SELECT 1 FROM static_ingest_state s
+                                 WHERE s.doc_id = v.metadata->>'doc_id'
+                                   AND s.status = 'FAILED'
+                             )
+                        )
+                  )
+                """, Integer.class, docId);
+        return count != null && count > 0;
+    }
+
+    @Override
     public boolean tryClaim(String docId, String checksum) {
         ensureStateTable();
+        if (hasActiveIndexedVersion(docId)) {
+            return false;
+        }
 
         Boolean claimed;
         try {
@@ -34,16 +59,19 @@ public class JdbcVectorStoreChecksumRepository implements VectorStoreChecksumRep
                             status = 'CLAIMED',
                             updated_at = CURRENT_TIMESTAMP
                     WHERE static_ingest_state.status = 'FAILED'
-                       OR static_ingest_state.checksum <> EXCLUDED.checksum
                     RETURNING TRUE
                     """, Boolean.class, docId, checksum);
         } catch (EmptyResultDataAccessException ex) {
             return false;
         }
+        if (!Boolean.TRUE.equals(claimed)) {
+            return false;
+        }
         jdbcTemplate.update("""
                 DELETE FROM vector_store
-                WHERE metadata->>'doc_id' = ? AND metadata->>'checksum' = ?
-                """, docId, checksum);
+                WHERE metadata->>'doc_id' = ?
+                  AND metadata->>'version' = '1'
+                """, docId);
         return true;
     }
 
@@ -80,7 +108,9 @@ public class JdbcVectorStoreChecksumRepository implements VectorStoreChecksumRep
         jdbcTemplate.update("""
                 DELETE FROM vector_store
                 WHERE metadata->>'doc_id' = ?
-                """, docId);
+                  AND metadata->>'version' = '1'
+                  AND metadata->>'checksum' = ?
+                """, docId, checksum);
     }
 
     @Override
