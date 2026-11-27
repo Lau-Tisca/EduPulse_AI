@@ -4,13 +4,16 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.edupulse.ingestdynamic.config.IngestDynamicProperties;
+import com.edupulse.ingestdynamic.dto.DocumentVersionInfo;
 import com.edupulse.ingestdynamic.dto.DynamicIngestResult;
 import com.edupulse.ingestdynamic.exception.GlobalExceptionHandler;
+import com.edupulse.ingestdynamic.exception.IngestionConflictException;
 import com.edupulse.ingestdynamic.exception.SsrfBlockedException;
 import com.edupulse.ingestdynamic.security.HmacSignatureVerifier;
 import com.edupulse.ingestdynamic.service.DynamicIngestService;
@@ -124,5 +127,37 @@ class DynamicEndpointsControllerTest {
                 .andExpect(jsonPath("$.accepted").value(true))
                 .andExpect(jsonPath("$.queuedCount").value(1))
                 .andExpect(jsonPath("$.jobIds[0]").value(42));
+    }
+
+    @Test
+    void returns409OnIngestionConflict413OnOversizedWebhookAnd200OnVersionHistory() throws Exception {
+        when(dynamicIngestService.ingestUrl("https://kubernetes.io/docs/busy", "k8s-busy"))
+                .thenThrow(new IngestionConflictException("Ingestion for document 'k8s-busy' is already in progress"));
+
+        mockMvc.perform(post("/ingest/dynamic/url")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"url\":\"https://kubernetes.io/docs/busy\",\"docId\":\"k8s-busy\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.status").value(409));
+
+        byte[] oversizedWebhook = new byte[WebhookController.MAX_WEBHOOK_PAYLOAD_BYTES + 1];
+        mockMvc.perform(post("/ingest/dynamic/webhook")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(oversizedWebhook))
+                .andExpect(status().isContentTooLarge())
+                .andExpect(jsonPath("$.status").value(413));
+
+        when(dynamicIngestService.getVersionHistory("k8s-rbac"))
+                .thenReturn(List.of(
+                        new DocumentVersionInfo(1, "hash1", false, 4),
+                        new DocumentVersionInfo(2, "hash2", true, 5)
+                ));
+
+        mockMvc.perform(get("/ingest/dynamic/versions/k8s-rbac"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].version").value(1))
+                .andExpect(jsonPath("$[0].isLatest").value(false))
+                .andExpect(jsonPath("$[1].version").value(2))
+                .andExpect(jsonPath("$[1].isLatest").value(true));
     }
 }

@@ -69,4 +69,55 @@ class ResourceDirectoryWatcherTest {
         assertThat(watcher.scanNow()).isZero();
         verify(ingestService, never()).ingestLocalFile(any());
     }
+
+    @Test
+    void skipsDuplicateSanitizedDocIdsAndAllowsSameStemDifferentExtensions() throws Exception {
+        Path spacePdf = Files.writeString(tempDir.resolve("k8s guide.pdf"), "%PDF-1.4 a");
+        Path underscorePdf = Files.writeString(tempDir.resolve("k8s_guide.pdf"), "%PDF-1.4 b");
+        Path sameStemMd = Files.writeString(tempDir.resolve("k8s_guide.md"), "# Markdown guide");
+
+        IngestDynamicProperties props = new IngestDynamicProperties(
+                512,
+                64,
+                new IngestDynamicProperties.Watcher(30, tempDir.toString()),
+                IngestDynamicProperties.Ingest.defaults(),
+                new IngestDynamicProperties.Webhook("secret")
+        );
+        DynamicIngestService ingestService = mock(DynamicIngestService.class);
+        when(ingestService.ingestLocalFile(any())).thenReturn(new DynamicIngestResult(
+                "doc", "src", "abc", 1, null, 1, 1, DynamicIngestResult.STATUS_INGESTED, "ok"));
+
+        ResourceDirectoryWatcher watcher = new ResourceDirectoryWatcher(props, ingestService);
+        int changed = watcher.scanNow();
+
+        assertThat(changed).isEqualTo(2);
+        verify(ingestService).ingestLocalFile(spacePdf);
+        verify(ingestService, never()).ingestLocalFile(underscorePdf);
+        verify(ingestService).ingestLocalFile(sameStemMd);
+    }
+
+    @Test
+    void skipsSymbolicLinksPointingOutsideWatchedDirectory() throws Exception {
+        Path watchedDir = Files.createDirectories(tempDir.resolve("watched"));
+        Path outsideSecret = Files.writeString(tempDir.resolve("secret.txt"), "DB_PASSWORD=supersecret");
+        Path symlink = watchedDir.resolve("leak.txt");
+        try {
+            Files.createSymbolicLink(symlink, outsideSecret);
+        } catch (UnsupportedOperationException | java.io.IOException ex) {
+            org.junit.jupiter.api.Assumptions.assumeTrue(false, "Symlink creation requires elevated privileges on this OS");
+        }
+
+        IngestDynamicProperties props = new IngestDynamicProperties(
+                512,
+                64,
+                new IngestDynamicProperties.Watcher(30, watchedDir.toString()),
+                IngestDynamicProperties.Ingest.defaults(),
+                new IngestDynamicProperties.Webhook("secret")
+        );
+        DynamicIngestService ingestService = mock(DynamicIngestService.class);
+        ResourceDirectoryWatcher watcher = new ResourceDirectoryWatcher(props, ingestService);
+
+        assertThat(watcher.scanNow()).isZero();
+        verify(ingestService, never()).ingestLocalFile(any());
+    }
 }

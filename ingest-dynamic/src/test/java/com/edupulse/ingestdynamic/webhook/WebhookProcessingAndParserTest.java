@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.edupulse.ingestdynamic.dto.DynamicIngestResult;
+import com.edupulse.ingestdynamic.exception.IngestionConflictException;
 import com.edupulse.ingestdynamic.exception.InvalidUrlException;
 import com.edupulse.ingestdynamic.exception.RemoteFetchException;
 import com.edupulse.ingestdynamic.exception.SsrfBlockedException;
@@ -21,6 +22,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Executor;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.http.HttpStatus;
 
 class WebhookProcessingAndParserTest {
@@ -69,6 +71,84 @@ class WebhookProcessingAndParserTest {
     void rejectsMalformedJsonWebhookPayload() {
         assertThatThrownBy(() -> parser.parse("{not-json".getBytes(StandardCharsets.UTF_8)))
                 .isInstanceOf(InvalidUrlException.class);
+    }
+
+    @Test
+    void preservesSlashesInGitHubBranchesAndRejectsPathTraversalSegments() {
+        byte[] slashBranchPush = """
+                {
+                  "ref": "refs/heads/release/v1.30",
+                  "repository": { "full_name": "kubernetes/website" },
+                  "commits": [
+                    { "added": ["content/en/docs/rbac.md"] }
+                  ]
+                }
+                """.getBytes(StandardCharsets.UTF_8);
+
+        List<WebhookTarget> targets = parser.parse(slashBranchPush);
+        assertThat(targets).containsExactly(new WebhookTarget(
+                "https://raw.githubusercontent.com/kubernetes/website/release/v1.30/content/en/docs/rbac.md",
+                null
+        ));
+
+        byte[] traversalPush = """
+                {
+                  "ref": "refs/heads/main",
+                  "repository": { "full_name": "kubernetes/website" },
+                  "commits": [
+                    { "added": ["../../other-org/other-repo/main/secret.md"] }
+                  ]
+                }
+                """.getBytes(StandardCharsets.UTF_8);
+
+        assertThatThrownBy(() -> parser.parse(traversalPush))
+                .isInstanceOf(InvalidUrlException.class)
+                .hasMessageContaining("Path traversal");
+    }
+
+    @Test
+    void rejectsWebhookExceedingMaxTargetCount() {
+        StringBuilder json = new StringBuilder("{\"urls\":[");
+        for (int i = 0; i <= WebhookPayloadParser.MAX_TARGETS_PER_WEBHOOK; i++) {
+            if (i > 0) {
+                json.append(',');
+            }
+            json.append("\"https://kubernetes.io/docs/page-").append(i).append("\"");
+        }
+        json.append("]}");
+
+        assertThatThrownBy(() -> parser.parse(json.toString().getBytes(StandardCharsets.UTF_8)))
+                .isInstanceOf(InvalidUrlException.class)
+                .hasMessageContaining("maximum allowed target count");
+    }
+
+    @Test
+    void retriesOnIngestionConflictAndSurvivesSaturatedExecutorQueue() {
+        WebhookRetryRepository repo = mock(WebhookRetryRepository.class);
+        DynamicIngestService ingestService = mock(DynamicIngestService.class);
+
+        WebhookJob conflictJob = new WebhookJob(4L, "https://kubernetes.io/busy", "busy", "PROCESSING", 0, 3, Instant.now(), null);
+        when(repo.claimJob(4L)).thenReturn(Optional.of(conflictJob));
+        when(ingestService.ingestUrl("https://kubernetes.io/busy", "busy"))
+                .thenThrow(new IngestionConflictException("already in progress"));
+
+        WebhookProcessingService directService = new WebhookProcessingService(repo, ingestService, Runnable::run);
+        directService.processJob(4L);
+        verify(repo).scheduleRetry(eq(4L), eq(1), any(Instant.class), eq("already in progress"));
+
+        // Saturated executor should NOT abort enqueueAndDispatch or throw 500.
+        Executor rejectingExecutor = cmd -> {
+            throw new TaskRejectedException("queue full");
+        };
+        when(repo.enqueue("https://kubernetes.io/a", null, 3)).thenReturn(10L);
+        when(repo.enqueue("https://kubernetes.io/b", null, 3)).thenReturn(11L);
+
+        WebhookProcessingService saturatedService = new WebhookProcessingService(repo, ingestService, rejectingExecutor);
+        List<Long> ids = saturatedService.enqueueAndDispatch(List.of(
+                new WebhookTarget("https://kubernetes.io/a", null),
+                new WebhookTarget("https://kubernetes.io/b", null)
+        ));
+        assertThat(ids).containsExactly(10L, 11L);
     }
 
     @Test

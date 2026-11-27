@@ -5,8 +5,11 @@ import com.edupulse.ingestdynamic.dto.DynamicIngestResult;
 import com.edupulse.ingestdynamic.service.DynamicIngestService;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -24,7 +27,8 @@ import org.springframework.stereotype.Component;
  * Synchronizes against {@code vector_store} via {@link DynamicIngestService}: unchanged PDFs
  * previously indexed by {@code ingest-static} are skipped, modified files trigger version
  * {@code N + 1} with {@code is_latest} cutover, and new {@code .pdf/.md/.txt/.html} files are
- * automatically ingested.
+ * automatically ingested. Symbolic links and paths escaping {@code APP_WATCHER_RESOURCES_DIR}
+ * are rejected.
  */
 @Component
 public class ResourceDirectoryWatcher {
@@ -69,13 +73,38 @@ public class ResourceDirectoryWatcher {
             return 0;
         }
 
-        List<Path> candidates;
+        Path baseReal;
+        try {
+            baseReal = resourcesDir.toRealPath();
+        } catch (IOException ex) {
+            log.warn("File watcher failed to resolve canonical directory {}: {}", resourcesDir, ex.getMessage());
+            return 0;
+        }
+
+        List<Path> candidates = new ArrayList<>();
         try (Stream<Path> stream = Files.list(resourcesDir)) {
-            candidates = stream
-                    .filter(Files::isRegularFile)
-                    .filter(ResourceDirectoryWatcher::isSupportedFile)
+            List<Path> listed = stream
                     .sorted(Comparator.comparing(path -> path.getFileName().toString()))
                     .toList();
+            for (Path entry : listed) {
+                if (Files.isSymbolicLink(entry)) {
+                    log.warn("File watcher skipped symbolic link in resources directory: {}", entry.getFileName());
+                    continue;
+                }
+                if (!Files.isRegularFile(entry, LinkOption.NOFOLLOW_LINKS) || !isSupportedFile(entry)) {
+                    continue;
+                }
+                try {
+                    Path realEntry = entry.toRealPath();
+                    if (!realEntry.startsWith(baseReal)) {
+                        log.warn("File watcher blocked path escaping resources directory: {}", entry.getFileName());
+                        continue;
+                    }
+                    candidates.add(entry);
+                } catch (IOException ex) {
+                    log.warn("File watcher could not resolve file {}: {}", entry.getFileName(), ex.getMessage());
+                }
+            }
         } catch (IOException ex) {
             log.warn("File watcher failed to list directory {}: {}", resourcesDir, ex.getMessage());
             return 0;
@@ -83,7 +112,14 @@ public class ResourceDirectoryWatcher {
 
         int processed = 0;
         int changed = 0;
+        Set<String> seenDocIds = new HashSet<>();
         for (Path file : candidates) {
+            String derivedDocId = DynamicIngestService.deriveFileDocId(file.getFileName().toString());
+            if (!seenDocIds.add(derivedDocId)) {
+                log.error("File watcher skipped file '{}' because derived doc_id '{}' collides with another file in {}",
+                        file.getFileName(), derivedDocId, resourcesDir);
+                continue;
+            }
             try {
                 DynamicIngestResult result = dynamicIngestService.ingestLocalFile(file);
                 processed++;

@@ -4,6 +4,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -16,6 +17,7 @@ import org.springframework.stereotype.Repository;
 public class JdbcWebhookRetryRepository implements WebhookRetryRepository {
 
     private final JdbcTemplate jdbcTemplate;
+    private final AtomicBoolean queueTableInitialized = new AtomicBoolean(false);
 
     public JdbcWebhookRetryRepository(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
@@ -43,8 +45,10 @@ public class JdbcWebhookRetryRepository implements WebhookRetryRepository {
                     UPDATE webhook_retry_queue
                     SET status = 'PROCESSING', updated_at = CURRENT_TIMESTAMP
                     WHERE id = ?
-                      AND status IN ('PENDING', 'RETRY_PENDING')
-                      AND next_retry_at <= CURRENT_TIMESTAMP
+                      AND (
+                            (status IN ('PENDING', 'RETRY_PENDING') AND next_retry_at <= CURRENT_TIMESTAMP)
+                            OR (status = 'PROCESSING' AND updated_at < CURRENT_TIMESTAMP - INTERVAL '15 minutes')
+                      )
                     RETURNING id, url, doc_id, status, attempts, max_attempts, next_retry_at, last_error
                     """,
                     (rs, rowNum) -> new WebhookJob(
@@ -70,8 +74,8 @@ public class JdbcWebhookRetryRepository implements WebhookRetryRepository {
         return jdbcTemplate.queryForList("""
                 SELECT id
                 FROM webhook_retry_queue
-                WHERE status IN ('PENDING', 'RETRY_PENDING')
-                  AND next_retry_at <= CURRENT_TIMESTAMP
+                WHERE (status IN ('PENDING', 'RETRY_PENDING') AND next_retry_at <= CURRENT_TIMESTAMP)
+                   OR (status = 'PROCESSING' AND updated_at < CURRENT_TIMESTAMP - INTERVAL '15 minutes')
                 ORDER BY next_retry_at ASC, id ASC
                 LIMIT ?
                 """, Long.class, limit);
@@ -124,6 +128,9 @@ public class JdbcWebhookRetryRepository implements WebhookRetryRepository {
     }
 
     private void ensureQueueTable() {
+        if (queueTableInitialized.get()) {
+            return;
+        }
         jdbcTemplate.execute("""
                 CREATE TABLE IF NOT EXISTS webhook_retry_queue (
                     id BIGSERIAL PRIMARY KEY,
@@ -138,6 +145,7 @@ public class JdbcWebhookRetryRepository implements WebhookRetryRepository {
                     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 """);
+        queueTableInitialized.set(true);
     }
 
     private static String truncateError(String error) {

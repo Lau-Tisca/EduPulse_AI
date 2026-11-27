@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -77,7 +78,12 @@ public class WebhookProcessingService {
     }
 
     private void dispatchAsync(long jobId) {
-        webhookTaskExecutor.execute(() -> processJob(jobId));
+        try {
+            webhookTaskExecutor.execute(() -> processJob(jobId));
+        } catch (RejectedExecutionException ex) {
+            log.warn("Webhook executor saturated; jobId={} remains persisted in webhook_retry_queue for retry poller",
+                    jobId);
+        }
     }
 
     public void processJob(long jobId) {

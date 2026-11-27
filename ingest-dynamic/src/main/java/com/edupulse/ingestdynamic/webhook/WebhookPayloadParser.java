@@ -29,6 +29,8 @@ import tools.jackson.databind.json.JsonMapper;
 @Component
 public class WebhookPayloadParser {
 
+    static final int MAX_TARGETS_PER_WEBHOOK = 100;
+
     private static final Set<String> SUPPORTED_EXTENSIONS = Set.of(
             ".md", ".markdown", ".pdf", ".html", ".htm", ".txt"
     );
@@ -88,6 +90,11 @@ public class WebhookPayloadParser {
             parseGitHubPush(root, deduplicated);
         }
 
+        if (deduplicated.size() > MAX_TARGETS_PER_WEBHOOK) {
+            throw new InvalidUrlException(
+                    "Webhook payload exceeds maximum allowed target count of " + MAX_TARGETS_PER_WEBHOOK);
+        }
+
         return new ArrayList<>(deduplicated.values());
     }
 
@@ -102,22 +109,22 @@ public class WebhookPayloadParser {
             throw new InvalidUrlException("Invalid GitHub repository.full_name in webhook payload");
         }
 
-        String branch = extractBranch(root);
+        String encodedBranch = encodeSafePathSegments(extractBranch(root), "branch");
         JsonNode commitsNode = root.get("commits");
         if (commitsNode == null || !commitsNode.isArray()) {
             return;
         }
 
         for (JsonNode commit : commitsNode) {
-            addCommitPaths(commit.get("added"), fullName, branch, out);
-            addCommitPaths(commit.get("modified"), fullName, branch, out);
+            addCommitPaths(commit.get("added"), fullName, encodedBranch, out);
+            addCommitPaths(commit.get("modified"), fullName, encodedBranch, out);
         }
     }
 
     private void addCommitPaths(
             JsonNode pathsNode,
             String fullName,
-            String branch,
+            String encodedBranch,
             Map<String, WebhookTarget> out
     ) {
         if (pathsNode == null || !pathsNode.isArray()) {
@@ -131,8 +138,8 @@ public class WebhookPayloadParser {
             if (filePath.isEmpty() || !isSupportedDocPath(filePath)) {
                 continue;
             }
-            String encodedPath = encodePathSegments(filePath);
-            String url = "https://raw.githubusercontent.com/" + fullName + "/" + encodeSegment(branch) + "/" + encodedPath;
+            String encodedPath = encodeSafePathSegments(filePath, "commit file path");
+            String url = "https://raw.githubusercontent.com/" + fullName + "/" + encodedBranch + "/" + encodedPath;
             out.putIfAbsent(url, new WebhookTarget(url, null));
         }
     }
@@ -169,10 +176,23 @@ public class WebhookPayloadParser {
         return false;
     }
 
-    private static String encodePathSegments(String path) {
+    private static String encodeSafePathSegments(String path, String fieldLabel) {
+        if (path == null || path.isBlank() || path.indexOf('\\') >= 0) {
+            throw new InvalidUrlException("Invalid " + fieldLabel + " in webhook payload");
+        }
         String trimmed = path.startsWith("/") ? path.substring(1) : path;
-        return Arrays.stream(trimmed.split("/"))
+        List<String> segments = Arrays.stream(trimmed.split("/"))
                 .filter(segment -> !segment.isEmpty())
+                .toList();
+        if (segments.isEmpty()) {
+            throw new InvalidUrlException("Invalid " + fieldLabel + " in webhook payload");
+        }
+        for (String segment : segments) {
+            if (".".equals(segment) || "..".equals(segment)) {
+                throw new InvalidUrlException("Path traversal segment rejected in GitHub webhook " + fieldLabel);
+            }
+        }
+        return segments.stream()
                 .map(WebhookPayloadParser::encodeSegment)
                 .collect(Collectors.joining("/"));
     }
