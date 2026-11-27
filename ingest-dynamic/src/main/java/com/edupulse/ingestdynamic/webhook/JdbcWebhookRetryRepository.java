@@ -180,6 +180,16 @@ public class JdbcWebhookRetryRepository implements WebhookRetryRepository {
                 ALTER TABLE webhook_retry_queue
                 ADD COLUMN IF NOT EXISTS lease_token VARCHAR(64)
                 """);
+        jdbcTemplate.execute("""
+                CREATE INDEX IF NOT EXISTS idx_webhook_retry_queue_due
+                ON webhook_retry_queue (next_retry_at, id)
+                WHERE status IN ('PENDING', 'RETRY_PENDING')
+                """);
+        jdbcTemplate.execute("""
+                CREATE INDEX IF NOT EXISTS idx_webhook_retry_queue_processing
+                ON webhook_retry_queue (updated_at)
+                WHERE status = 'PROCESSING'
+                """);
         queueTableInitialized.set(true);
     }
 

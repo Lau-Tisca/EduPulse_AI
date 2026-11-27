@@ -14,7 +14,9 @@ import com.edupulse.ingestdynamic.fetch.RemoteContentFetcher;
 import com.edupulse.ingestdynamic.parser.ContentParser;
 import com.edupulse.ingestdynamic.versioning.DocumentVersionRepository;
 import com.edupulse.ingestdynamic.versioning.DocumentVersionRepository.VersionSnapshot;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -148,13 +150,30 @@ public class DynamicIngestService {
 
         String filename = fileReal.getFileName().toString();
         String docId = deriveFileDocId(filename);
-        byte[] bytes;
-        try {
-            bytes = Files.readAllBytes(fileReal);
+        byte[] bytes = readLocalFileBounded(fileReal, properties.ingest().maxBytes(), filename);
+        return ingestPayload(docId, filename, "", bytes);
+    }
+
+    private static byte[] readLocalFileBounded(Path fileReal, long maxBytes, String filename) {
+        try (InputStream in = Files.newInputStream(fileReal);
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[8192];
+            long total = 0;
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                total += read;
+                if (total > maxBytes) {
+                    throw new RemoteFetchException(HttpStatus.CONTENT_TOO_LARGE,
+                            "Watched file exceeds maximum allowed size of " + maxBytes + " bytes: " + filename);
+                }
+                out.write(buffer, 0, read);
+            }
+            return out.toByteArray();
+        } catch (RemoteFetchException ex) {
+            throw ex;
         } catch (IOException ex) {
             throw new ContentParseException("Failed to read watched file: " + filename, ex);
         }
-        return ingestPayload(docId, filename, "", bytes);
     }
 
     /**

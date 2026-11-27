@@ -95,5 +95,7 @@ class JdbcWebhookRetryRepositoryTest {
 
         assertThat(reset).isEqualTo(2);
         verify(jdbcTemplate).update(contains("WHERE status = 'PROCESSING'\n  AND updated_at < CURRENT_TIMESTAMP - INTERVAL '15 minutes'"));
+        verify(jdbcTemplate).execute(contains("idx_webhook_retry_queue_due"));
+        verify(jdbcTemplate).execute(contains("idx_webhook_retry_queue_processing"));
     }
 }
