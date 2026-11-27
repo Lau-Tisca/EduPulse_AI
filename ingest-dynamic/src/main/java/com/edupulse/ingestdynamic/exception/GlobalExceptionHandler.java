@@ -47,6 +47,12 @@ public class GlobalExceptionHandler {
         return buildError(HttpStatus.valueOf(422), ex.getMessage());
     }
 
+    @ExceptionHandler(IngestionConflictException.class)
+    public ResponseEntity<Map<String, Object>> handleIngestionConflict(IngestionConflictException ex) {
+        log.warn("Dynamic ingestion claim conflict: {}", sanitizeForLog(ex.getMessage()));
+        return buildError(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
     @ExceptionHandler(RemoteFetchException.class)
     public ResponseEntity<Map<String, Object>> handleRemoteFetch(RemoteFetchException ex) {
         log.warn("Remote fetch failed (HTTP {}): {}", ex.status().value(), sanitizeForLog(ex.getMessage()));

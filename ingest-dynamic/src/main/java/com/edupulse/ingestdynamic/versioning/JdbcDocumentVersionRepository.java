@@ -5,6 +5,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -21,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class JdbcDocumentVersionRepository implements DocumentVersionRepository {
 
     private final JdbcTemplate jdbcTemplate;
+    private final AtomicBoolean stateTableInitialized = new AtomicBoolean(false);
 
     public JdbcDocumentVersionRepository(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
@@ -36,16 +38,34 @@ public class JdbcDocumentVersionRepository implements DocumentVersionRepository 
                 .mapToInt(DocumentVersionInfo::version)
                 .max()
                 .orElse(0);
-        DocumentVersionInfo latest = versions.stream()
+        // Only treat rows with is_latest=true as the active version; never fall back to unactivated
+        // partial rows (otherwise a crashed v1 ingestion would permanently skip future retries).
+        Optional<DocumentVersionInfo> latestOpt = versions.stream()
                 .filter(DocumentVersionInfo::isLatest)
-                .max(Comparator.comparingInt(DocumentVersionInfo::version))
-                .orElse(versions.getLast());
-        return Optional.of(new VersionSnapshot(latest.version(), maxVersion, latest.checksum()));
+                .max(Comparator.comparingInt(DocumentVersionInfo::version));
+        return Optional.of(new VersionSnapshot(
+                latestOpt.map(DocumentVersionInfo::version).orElse(null),
+                maxVersion,
+                latestOpt.map(DocumentVersionInfo::checksum).orElse(null)
+        ));
     }
 
     @Override
+    @Transactional
     public boolean tryClaim(String docId, int targetVersion, String checksum) {
         ensureStateTable();
+        // Clean up any unactivated partial chunks left behind by a prior FAILED or expired (>15m) CLAIMED attempt.
+        jdbcTemplate.update("""
+                DELETE FROM vector_store v
+                USING dynamic_ingest_state s
+                WHERE s.doc_id = ?
+                  AND (s.status = 'FAILED'
+                       OR (s.status = 'CLAIMED' AND s.updated_at < CURRENT_TIMESTAMP - INTERVAL '15 minutes'))
+                  AND v.metadata->>'doc_id' = s.doc_id
+                  AND v.metadata->>'version' = s.version::text
+                  AND v.metadata->>'is_latest' = 'false'
+                """, docId);
+
         Boolean claimed;
         try {
             claimed = jdbcTemplate.queryForObject("""
@@ -57,6 +77,7 @@ public class JdbcDocumentVersionRepository implements DocumentVersionRepository 
                             status = 'CLAIMED',
                             updated_at = CURRENT_TIMESTAMP
                     WHERE dynamic_ingest_state.status <> 'CLAIMED'
+                       OR dynamic_ingest_state.updated_at < CURRENT_TIMESTAMP - INTERVAL '15 minutes'
                     RETURNING TRUE
                     """, Boolean.class, docId, targetVersion, checksum);
         } catch (EmptyResultDataAccessException ex) {
@@ -86,16 +107,21 @@ public class JdbcDocumentVersionRepository implements DocumentVersionRepository 
                 SET metadata = jsonb_set(metadata::jsonb, '{is_latest}', 'false'::jsonb)::json
                 WHERE metadata->>'doc_id' = ?
                   AND metadata->>'is_latest' = 'true'
-                  AND metadata->>'version' <> ?
+                  AND COALESCE(metadata->>'version', '') <> ?
                 """, docId, versionStr);
 
         // Atomically promote the newly written version's chunks to is_latest=true.
-        jdbcTemplate.update("""
+        int promoted = jdbcTemplate.update("""
                 UPDATE vector_store
                 SET metadata = jsonb_set(metadata::jsonb, '{is_latest}', 'true'::jsonb)::json
                 WHERE metadata->>'doc_id' = ?
                   AND metadata->>'version' = ?
                 """, docId, versionStr);
+        if (promoted == 0) {
+            throw new IllegalStateException(
+                    "No chunks found to activate for docId='" + docId + "' version=" + newVersion
+                            + "; rolling back is_latest cutover");
+        }
 
         jdbcTemplate.update("""
                 UPDATE dynamic_ingest_state
@@ -105,6 +131,7 @@ public class JdbcDocumentVersionRepository implements DocumentVersionRepository 
     }
 
     @Override
+    @Transactional
     public void rollbackFailedVersion(String docId, int failedVersion, String checksum) {
         ensureStateTable();
         // Delete ONLY partial chunks of the failed version; never touch previous versions.
@@ -122,8 +149,19 @@ public class JdbcDocumentVersionRepository implements DocumentVersionRepository 
     }
 
     @Override
+    @Transactional
     public int resetInterruptedClaims() {
         ensureStateTable();
+        // Remove unactivated partial chunks written before an abrupt crash so they cannot orphan or shadow v1.
+        jdbcTemplate.update("""
+                DELETE FROM vector_store v
+                USING dynamic_ingest_state s
+                WHERE s.status = 'CLAIMED'
+                  AND v.metadata->>'doc_id' = s.doc_id
+                  AND v.metadata->>'version' = s.version::text
+                  AND v.metadata->>'is_latest' = 'false'
+                """);
+
         return jdbcTemplate.update("""
                 UPDATE dynamic_ingest_state
                 SET status = 'FAILED', updated_at = CURRENT_TIMESTAMP
@@ -161,6 +199,9 @@ public class JdbcDocumentVersionRepository implements DocumentVersionRepository 
     }
 
     private void ensureStateTable() {
+        if (stateTableInitialized.get()) {
+            return;
+        }
         jdbcTemplate.execute("""
                 CREATE TABLE IF NOT EXISTS dynamic_ingest_state (
                     doc_id VARCHAR(255) PRIMARY KEY,
@@ -170,6 +211,7 @@ public class JdbcDocumentVersionRepository implements DocumentVersionRepository 
                     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 """);
+        stateTableInitialized.set(true);
     }
 
     private static Integer parseIntOrNull(String value) {

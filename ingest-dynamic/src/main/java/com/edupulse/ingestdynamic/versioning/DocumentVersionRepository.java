@@ -10,7 +10,12 @@ import java.util.Optional;
  */
 public interface DocumentVersionRepository {
 
-    record VersionSnapshot(int latestVersion, int maxVersion, String latestChecksum) {
+    /**
+     * Snapshot of existing versions in {@code vector_store}.
+     * {@code latestVersion} and {@code latestChecksum} are {@code null} if only unactivated
+     * ({@code is_latest=false}) rows exist.
+     */
+    record VersionSnapshot(Integer latestVersion, int maxVersion, String latestChecksum) {
     }
 
     /**
