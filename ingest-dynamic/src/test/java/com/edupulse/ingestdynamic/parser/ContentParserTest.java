@@ -65,6 +65,31 @@ class ContentParserTest {
     }
 
     @Test
+    void preservesLiteralBackslashNInCodeBlocksAndSeparatesTableCells() {
+        String html = """
+                <html><body><main>
+                  <p>Line one<br>Line two</p>
+                  <pre><code>kubectl get pods -o jsonpath='{.items[*].metadata.name}{"\\n"}'</code></pre>
+                  <table>
+                    <tr><th>Field</th><th>Description</th></tr>
+                    <tr><td>kind</td><td>Pod</td></tr>
+                  </table>
+                </main></body></html>
+                """;
+
+        List<Document> docs = htmlParser.parse(html.getBytes(StandardCharsets.UTF_8), "https://kubernetes.io/docs/kubectl");
+
+        assertThat(docs).hasSize(1);
+        assertThat(docs.getFirst().getText())
+                .contains("Line one\nLine two")
+                .contains("kubectl get pods -o jsonpath='{.items[*].metadata.name}{\"\\n\"}'")
+                .contains("Field Description")
+                .contains("kind Pod")
+                .doesNotContain("FieldDescription")
+                .doesNotContain("kindPod");
+    }
+
+    @Test
     void stripsYamlFrontmatterHtmlCommentsAndNulBytesFromMarkdown() {
         String md = """
                 ---

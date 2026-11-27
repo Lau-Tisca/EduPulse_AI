@@ -8,6 +8,7 @@ import java.util.Map;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
+import org.jsoup.nodes.TextNode;
 import org.springframework.stereotype.Component;
 
 /**
@@ -90,13 +91,19 @@ public class HtmlContentParser {
     }
 
     private String extractStructuredText(Element root) {
-        // Insert newline markers around block elements and <br> so headings/paragraphs don't merge.
+        // Insert newline markers around block elements and <br>, plus spaces between table cells,
+        // without globally rewriting literal "\n" sequences inside code snippets.
         Element copy = root.clone();
-        copy.select("br").after("\\n");
+        for (Element br : copy.select("br")) {
+            br.replaceWith(new TextNode("\n"));
+        }
+        for (Element cell : copy.select("td, th")) {
+            cell.appendText(" ");
+        }
         for (Element block : copy.select(BLOCK_ELEMENTS)) {
             block.prependText("\n");
             block.appendText("\n");
         }
-        return copy.wholeText().replace("\\n", "\n");
+        return copy.wholeText();
     }
 }

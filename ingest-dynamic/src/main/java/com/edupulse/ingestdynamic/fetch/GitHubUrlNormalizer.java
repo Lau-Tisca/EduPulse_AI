@@ -31,6 +31,10 @@ public class GitHubUrlNormalizer {
         if (!"https".equalsIgnoreCase(uri.getScheme())) {
             return rawUrl;
         }
+        // Preserve embedded credentials or non-standard ports so SsrfGuard rejects them explicitly.
+        if (uri.getRawUserInfo() != null || (uri.getPort() != -1 && uri.getPort() != 443)) {
+            return rawUrl;
+        }
         String host = uri.getHost();
         if (host == null || !"github.com".equalsIgnoreCase(host)) {
             return rawUrl;

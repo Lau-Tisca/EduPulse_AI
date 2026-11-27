@@ -57,12 +57,24 @@ class SsrfGuardTest {
             "http://kubernetes.io/docs/home/",
             "ftp://kubernetes.io/docs/home/",
             "file:///etc/passwd",
-            "https://user:pass@kubernetes.io/docs/home/"
+            "https://user:pass@kubernetes.io/docs/home/",
+            "https://kubernetes.io:8080/docs/home/",
+            "https://kubernetes.io:8443/docs/home/"
     })
-    void blocksNonHttpsAndEmbeddedCredentials(String url) {
+    void blocksNonHttpsEmbeddedCredentialsAndNonStandardPorts(String url) {
         SsrfGuard guard = guardWithIp("93.184.216.34");
         assertThatThrownBy(() -> guard.validate(url))
                 .isInstanceOf(SsrfBlockedException.class);
+    }
+
+    @Test
+    void allowsExplicitHttpsPort443AndReturnsValidatedAddressesForPinning() {
+        SsrfGuard guard = guardWithIp("93.184.216.34");
+        SsrfGuard.ValidatedTarget target = guard.validateAndResolve("https://kubernetes.io:443/docs/");
+        assertThat(target.uri().getHost()).isEqualTo("kubernetes.io");
+        assertThat(target.resolvedAddresses())
+                .extracting(InetAddress::getHostAddress)
+                .containsExactly("93.184.216.34");
     }
 
     @ParameterizedTest
@@ -95,7 +107,15 @@ class SsrfGuardTest {
             "fc00::1",
             "fd12:3456::1",
             "::ffff:127.0.0.1",
-            "::ffff:169.254.169.254"
+            "::ffff:169.254.169.254",
+            "::127.0.0.1",
+            "::169.254.169.254",
+            "64:ff9b::169.254.169.254",
+            "64:ff9b:1::1",
+            "2002:a9fe:a9fe::1",
+            "2001:0000:4136:e378::1",
+            "2001:db8::1",
+            "100::1"
     })
     void blocksPrivateLoopbackLinkLocalAndInternalIps(String ip) {
         SsrfGuard guard = guardWithIp(ip);

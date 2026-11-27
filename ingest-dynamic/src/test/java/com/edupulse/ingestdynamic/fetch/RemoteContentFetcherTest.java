@@ -99,6 +99,109 @@ class RemoteContentFetcherTest {
                 .isEqualTo(HttpStatus.GATEWAY_TIMEOUT);
     }
 
+    @Test
+    void passesValidatedPinnedAddressesToTransportAndEnforcesBodyReadDeadline() throws Exception {
+        IngestDynamicProperties fastTimeoutProps = new IngestDynamicProperties(
+                512,
+                64,
+                IngestDynamicProperties.Watcher.defaults(),
+                new IngestDynamicProperties.Ingest(1024, 50, true, IngestDynamicProperties.Ingest.DEFAULT_ALLOWED_DOMAINS),
+                new IngestDynamicProperties.Webhook("secret")
+        );
+        SsrfGuard guard = new SsrfGuard(fastTimeoutProps, host -> new InetAddress[]{InetAddress.getByName("93.184.216.34")});
+        java.util.concurrent.atomic.AtomicReference<List<InetAddress>> capturedPinned = new java.util.concurrent.atomic.AtomicReference<>();
+
+        RemoteContentFetcher.HttpTransport slowBodyTransport = (uri, pinnedAddresses, timeout) -> {
+            capturedPinned.set(pinnedAddresses);
+            InputStream slowStream = new InputStream() {
+                @Override
+                public int read() {
+                    return 'a';
+                }
+
+                @Override
+                public int read(byte[] b, int off, int len) throws java.io.IOException {
+                    try {
+                        Thread.sleep(60);
+                    } catch (InterruptedException ex) {
+                        Thread.currentThread().interrupt();
+                        throw new java.io.IOException(ex);
+                    }
+                    b[off] = 'a';
+                    return 1;
+                }
+            };
+            return new RemoteContentFetcher.TransportResponse(200, null, "text/plain", -1L, slowStream, null);
+        };
+
+        RemoteContentFetcher deadlineFetcher = new RemoteContentFetcher(
+                fastTimeoutProps, guard, new GitHubUrlNormalizer(), slowBodyTransport);
+
+        assertThatThrownBy(() -> deadlineFetcher.fetch("https://kubernetes.io/docs/tarpit"))
+                .isInstanceOf(RemoteFetchException.class)
+                .extracting(ex -> ((RemoteFetchException) ex).status())
+                .isEqualTo(HttpStatus.GATEWAY_TIMEOUT);
+
+        assertThat(capturedPinned.get())
+                .extracting(InetAddress::getHostAddress)
+                .containsExactly("93.184.216.34");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void rejectsEmbeddedCredentialsOnGitHubBlobUrlBeforeAnyHttpCall() throws Exception {
+        assertThatThrownBy(() -> fetcher.fetch("https://user:pass@github.com/kubernetes/website/blob/main/README.md"))
+                .isInstanceOf(SsrfBlockedException.class);
+
+        verify(httpClient, times(0)).send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void mapsMalformedRedirectLocationAndExcessiveRedirectsToBadGateway() throws Exception {
+        HttpResponse<InputStream> badLocation = mockRedirect(302, "https://kubernetes.io/bad space");
+        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class))).thenReturn(badLocation);
+
+        assertThatThrownBy(() -> fetcher.fetch("https://kubernetes.io/docs/old"))
+                .isInstanceOf(RemoteFetchException.class)
+                .extracting(ex -> ((RemoteFetchException) ex).status())
+                .isEqualTo(HttpStatus.BAD_GATEWAY);
+
+        HttpResponse<InputStream> loopRedirect = mockRedirect(302, "https://kubernetes.io/docs/loop");
+        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class))).thenReturn(loopRedirect);
+
+        assertThatThrownBy(() -> fetcher.fetch("https://kubernetes.io/docs/loop"))
+                .isInstanceOf(RemoteFetchException.class)
+                .extracting(ex -> ((RemoteFetchException) ex).status())
+                .isEqualTo(HttpStatus.BAD_GATEWAY);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void rejectsDeclaredContentLengthExceedingMaxBytesAndRewritesGitHubRedirect() throws Exception {
+        HttpResponse<InputStream> hugeHeader = mock(HttpResponse.class);
+        when(hugeHeader.statusCode()).thenReturn(200);
+        when(hugeHeader.headers()).thenReturn(HttpHeaders.of(
+                Map.of("Content-Length", List.of("999999"), "Content-Type", List.of("text/plain")),
+                (k, v) -> true));
+        when(hugeHeader.body()).thenReturn(new ByteArrayInputStream(new byte[0]));
+        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class))).thenReturn(hugeHeader);
+
+        assertThatThrownBy(() -> fetcher.fetch("https://kubernetes.io/docs/huge"))
+                .isInstanceOf(RemoteFetchException.class)
+                .extracting(ex -> ((RemoteFetchException) ex).status())
+                .isEqualTo(HttpStatus.CONTENT_TOO_LARGE);
+
+        HttpResponse<InputStream> redirectToBlob = mockRedirect(302,
+                "https://github.com/kubernetes/website/blob/main/README.md");
+        HttpResponse<InputStream> okRaw = mockResponse(200, "text/markdown", "# Raw");
+        when(httpClient.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class)))
+                .thenReturn(redirectToBlob, okRaw);
+
+        FetchedContent content = fetcher.fetch("https://kubernetes.io/docs/github-ref");
+        assertThat(content.finalUrl()).isEqualTo("https://raw.githubusercontent.com/kubernetes/website/main/README.md");
+    }
+
     @SuppressWarnings("unchecked")
     private static HttpResponse<InputStream> mockResponse(int status, String contentType, String body) {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);

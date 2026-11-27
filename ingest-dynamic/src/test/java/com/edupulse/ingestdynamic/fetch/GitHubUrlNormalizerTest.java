@@ -26,4 +26,13 @@ class GitHubUrlNormalizerTest {
         assertThat(normalizer.normalize(k8s)).isEqualTo(k8s);
         assertThat(normalizer.normalize(repoRoot)).isEqualTo(repoRoot);
     }
+
+    @Test
+    void doesNotStripCredentialsOrNonStandardPortsSoSsrfGuardCanRejectThem() {
+        String withCreds = "https://user:pass@github.com/kubernetes/website/blob/main/README.md";
+        String withPort = "https://github.com:8443/kubernetes/website/blob/main/README.md";
+
+        assertThat(normalizer.normalize(withCreds)).isEqualTo(withCreds);
+        assertThat(normalizer.normalize(withPort)).isEqualTo(withPort);
+    }
 }
