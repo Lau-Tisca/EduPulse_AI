@@ -135,6 +135,23 @@ class StaticIngestServiceTest {
     }
 
     @Test
+    void skipsStaticOverwriteWhenDocumentIsAlreadyActiveOrDynamicallyVersioned() throws IOException {
+        byte[] pdfBytes = createMultiColumnAndTablePdf();
+        when(checksumRepository.hasActiveIndexedVersion("k8s-architecture-guide")).thenReturn(true);
+
+        StaticIngestItemResult result = staticIngestService.ingestBytes(
+                pdfBytes,
+                "k8s-architecture-guide.pdf",
+                "k8s-architecture-guide"
+        );
+
+        assertThat(result.status()).isEqualTo(StaticIngestItemResult.STATUS_SKIPPED);
+        assertThat(result.chunksCreated()).isZero();
+        verify(checksumRepository, never()).tryClaim(anyString(), anyString());
+        verify(vectorStore, never()).add(anyList());
+    }
+
+    @Test
     void ingestsAllPdfsInResourcesDirectory() throws IOException {
         Files.write(tempDir.resolve("doc-a.pdf"), createMultiColumnAndTablePdf());
         Files.write(tempDir.resolve("doc-b.pdf"), createMultiColumnAndTablePdf());
