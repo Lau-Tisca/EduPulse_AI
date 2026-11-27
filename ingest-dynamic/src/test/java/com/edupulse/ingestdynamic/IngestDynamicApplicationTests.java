@@ -1,10 +1,14 @@
 package com.edupulse.ingestdynamic;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.ai.vectorstore.VectorStore;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 @SpringBootTest(properties = {
         "eureka.client.enabled=false",
+        "spring.task.scheduling.enabled=false",
         "spring.autoconfigure.exclude="
                 + "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration,"
                 + "org.springframework.boot.jdbc.autoconfigure.JdbcTemplateAutoConfiguration,"
@@ -14,6 +18,12 @@ import org.springframework.boot.test.context.SpringBootTest;
                 + "org.springframework.ai.model.google.genai.autoconfigure.embedding.GoogleGenAiTextEmbeddingAutoConfiguration"
 })
 class IngestDynamicApplicationTests {
+
+    @MockitoBean
+    private VectorStore vectorStore;
+
+    @MockitoBean
+    private JdbcTemplate jdbcTemplate;
 
     @Test
     void contextLoads() {
